@@ -89,8 +89,9 @@ def rpc_exec(*args):
     except Exception,e:
         raise Exception("RPC failed: %s\n%s"%(str(args),str(e)))
 
-class layout_element:
+class layout_region:
     def __init__(self):
+        self.name=None
         self.cy=None
         self.cx=None
         self.colspan=None
@@ -100,17 +101,214 @@ class layout_element:
         self.h=None
         self.maxw=None
 
-class layout_container(layout_element):
+class layout_container(layout_region):
     def __init__(self):
         self.num_cols=None
         self.num_rows=None
         self.widths=[]
         self.heights=[]
-        self.widgets=
+        self.childs=[]
+        self.child_cx=0
+        self.child_cy=0
+        self.border_t=0
+        self.border_l=0
+        self.border_b=0
+        self.border_r=0
+        self.border_v=0
+        self.border_h=0
         super(container,self).__init__()
 
-    def compute_pos(x,y,w):
+    def add_region(self,el):
+        if el.colspan>self.num_cols:
+            raise Exception("invalid colspan")
+        if self.child_cx+el.colspan>self.num_cols:
+            self.child_cy+=1
+            self.child_cx=0
+        el.cy=self.child_cy
+        el.cx=self.child_cx
+        self.child_cx+=el.colspan
+        self.childs.append(el)
+
+    def _set_maxw(self):
+        if self.maxw!=None:
+            return
+        for el in self.childs:
+            el._set_maxw(el)
+        for el in self.childs:
+            if el.maxw==-1:
+                self.maxw=-1
+                return
+        w_left=[0]
+        for i in range(1,self.num_cols+1):
+            w_max=w_left[i-1]
+            for el in self.childs:
+                cr=el.cx+el.colspan
+                if cr!=i:
+                    continue
+                w=w_left[el.cx]+self.border_v+(maxw and el.maxw or el.w)
+                if w>w_max:
+                    w_max=w
+            w_left.append(w_max)
+        self.maxw=self.border_l+self.border_r+self.border_v*(self.num_cols-1)+w_left[-1]
+
+    def _set_w(self,w):
+        w_avail=w-self.border_l-self.border_r-self.num_cols*self.border_v
+        for el in self.childs:
+            el.w=0
+        w_left=[0]*(self.num_cols+1)
+        w_rest=w_avail
+        while w_rest>0:
+            if w_rest>self.num_cols:
+                dw=w_rest/self.num_cols
+            else:
+                dw=1
+            for el in self.childs:
+                if el.maxw:
+                    if not el.w<el.maxw:
+                        continue
+                    dw_=min(dw,el.maxw-el.w)
+                else:
+                    dw_=dw
+                el.w+=dw_
+                cr=el.cx+el.colspan
+                if w_left[el.cx]+el.w>w_left[cr]:
+                    for i in range(cr,self.num_cols):
+                        w_left[i]+=dw_
+                    w_rest-=dw_
+                    if not w_rest:
+                        break
+        self.w_left=w_left
+        for el in self.childs:
+            el._set_w(el,el.w)
+
+    def _set_h(self):
+        if self.h!=None:
+            return
+        for el in self.childs:
+            el._set_h()
+        h=0
+        for i in range(self.num_rows):
+            rowh=0
+            for el in self.childs:
+                if el.cy!=i:
+                    continue
+                if el.h>rowh:
+                    rowh=el.h
+            h+=rowh
+        h+=(self.num_rows-1)*self.border_h
+
+    def _set_pos(self):
+        self.colx[0]=self.border_l
+        for i in range(1,el.num_cols):
+            self.colx[i]=self.colx[i-1]+self.colw[i-1]
+        self.rowy[0]=self.border_t
+        for i in range(1,el.num_rows):
+            self.rowy[i]=self.rowy[i-1]+self.rowy[i-1]
+        for el in self.childs:
+            el.x=self.colx[el.cx]
+            el.y=self.rowy[el.cy]
+            el._set_pos()
+
+    def compute_pos(self,x,y,w):
+        self._set_maxw()
+        self._set_w(w)
+        self._set_h()
+        self._set_pos(x,y)
         pass
+
+    def to_s(self,d=0):
+        s="  "*d+"name=%s cy=%d cx=%d colspan=%d num_cols=%d num_rows=%d h=%d w=%d y=%d x=%d"%(self.name,self.cy,self.cx,self.colspan,self.num_cols,self.num_rows,self.h,self.w,self.y,self.x)
+        for el in self.childs:
+            s+="\n"+self.to_s(d+1)
+        return s
+
+def set_layout(cont):
+    cont.layout=container()
+    for el in cont:
+        if el.tag=="label":
+            colspan=el.attrib.get("colspan",1)
+            maxw=len(el.attrib.get("string",""))
+            el.layout=layout_region(colspan,maxw)
+            cont.layout.add_region(el.layout)
+        elif el.tag=="separator":
+            colspan=el.attrib.get("colspan",1)
+            maxw=None
+            el.layout=layout_region(colspan,maxw)
+            cont.layout.add_region(el.layout)
+        elif el.tag=="button":
+            colspan=el.attrib.get("colspan",1)
+            maxw=len(el.attrib.get("string",""))
+            el.layout=layout_region(colspan,maxw)
+            cont.layout.add_region(el.layout)
+        elif el.tag=="field":
+            if el.field["type"] in ("one2many","many2many"):
+                el.layout=set_layout(el)
+                cont.layout.add_region(el.layout)
+            else:
+                colspan=el.attrib.get("colspan",2)
+                colspan_label=1
+                colspab_input=colspan-1
+                maxw_label=len(el.field.get("string",""))+1
+                max_input=None
+                el.layout_label=layout_region(colspan_label,maxw_label)
+                el.layout_input=layout_region(colspan_input,maxw_input)
+                cont.layout.add_region(el.layout_label)
+                cont.layout.add_region(el.layout_input)
+        elif el.tag=="group":
+            el.layout=set_layout(el)
+            cont.layout.add_region(el.layout)
+        elif el.tag=="notebook":
+            el.layout=set_layout(el)
+            cont.layout.add_region(el.layout)
+        elif el.tag=="page":
+            el.layout=set_layout(el)
+            cont.layout.add_region(el.layout)
+    return cont.layout
+
+def render(cont):
+    for el in cont:
+        if el.invisible:
+            continue
+        if el.tag=="label":
+            l=el.layout
+            s=el.attrib.get("string","")[:l.w]
+            win.addstr(l.y,l.x,s)
+        elif el.tag=="separator":
+            l=el.layout
+            s=el.attrib.get("string","")
+            win.addstr(l.y,l.x,s)
+        elif el.tag=="button":
+            l=el.layout
+            s="["+el.attrib.get("string","")[:l.w-2]+"]"
+            win.addstr(l.y,l.x,s)
+        elif el.tag=="field":
+            s=el.field["string"]+":"
+            if fld["type"] in ("one2many","many2many"):
+                curses.textpad.rectangle(win,l.y,l.x,l.y+9,77)
+                win.addstr(l.y,l.x+2,s)
+                win.addstr(l.y+1,l.x+1,"Description   Qty")
+                win.vline(l.y+1,l.x+13,curses.ACS_VLINE,8)
+                win.addch(l.y,l.x+13,curses.ACS_TTEE)
+                win.addch(l.y+9,l.x+13,curses.ACS_BTEE)
+                win.vline(l.y+1,l.x+19,curses.ACS_VLINE,8)
+                win.addch(l.y,l.x+19,curses.ACS_TTEE)
+                win.addch(l.y+9,l.x+19,curses.ACS_BTEE)
+            else:
+                l=el.layout_label
+                s=el.attrib.get("string","")[:l.w-1]+":"
+                win.addstr(l.y,cont.x+cont.colw[l.cx+1]-len(s),s)
+                l=el.layout_input
+                win.addstr(l.y,l.x," "*l.w,curses.A_UNDERLINE)
+        elif el.tag=="group":
+            render(el)
+        elif el.tag=="notebook":
+            l=el.layout
+            curses.textpad.rectangle(win,l.y,l.x,21,78)
+            s=el[0].attrib["string"]
+            win.addstr(l.y,l.x+2,s)
+            render(el)
+        elif el.tag=="group":
+            render(el)
 
 def act_window_tree(act):
     #log("act_window_tree",act)
@@ -390,168 +588,6 @@ def act_window_form(act):
             x+=colw[name]
         screen.move(4,1)
     elif mode=="form":
-        def to_s(cont,d=0):
-            if d==0:
-                s="  "*d+cont.tag+" col=%d h=%d w=%d y=%d x=%d"%(cont.col,cont.h,cont.w,cont.y,cont.x)
-            else:
-                s="  "*d+cont.tag+" cy=%d cx=%d colspan=%d cr=%d col=%d h=%d w=%d y=%d x=%d inv=%d"%(cont.cy,cont.cx,cont.colspan,cont.cr,cont.col,cont.h,cont.w,cont.y,cont.x,cont.invisible)
-            for el in cont:
-                if el.tag in ("field","button","label","separator"):
-                    s+="\n"+"  "*(d+1)+el.tag+" cy=%d cx=%d colspan=%d cr=%d h=%d w=%d y=%d x=%d inv=%d"%(el.cy,el.cx,el.colspan,el.cr,el.h,el.w,el.y,el.x,el.invisible)
-                    name=el.attrib.get("name")
-                    if name:
-                        s+=" name="+name
-                    string=el.attrib.get("string")
-                    if string:
-                        s+=" string="+string
-                elif el.tag in ("group","notebook","page"):
-                    s+="\n"+to_s(el,d+1)
-            return s
-
-        def init_elems(cont):
-            if cont.tag=="tree":
-                col=len([el for el in cont if not el.attrib.get("invisible")])
-            else:
-                col=int(cont.attrib.get("col",4))
-            cont.col=col
-            cont.bt=cont.bl=cont.bb=cont.br=0
-            cont.w=cont.h=cont.y=cont.x=0
-            if cont.tag=="notebook":
-                cont.bt=1
-                cont.bb=1
-                cont.bl=cont.br=1
-            cy=cx=0
-            for el in cont:
-                el.container=cont
-                if el.tag in ("page","tree","form"):
-                    cx=0
-                if cont.tag=="tree":
-                    def_colspan=1
-                else:
-                    if el.tag in ("label","button","separator"):
-                        def_colspan=1
-                    else:
-                        def_colspan=2
-                colspan=int(el.attrib.get("colspan",def_colspan))
-                if cx+colspan>col:
-                    cy+=1
-                    cx=0
-                if colspan>col:
-                    raise Exception("invalid colspan")
-                el.cy=cy
-                el.cx=cx
-                el.colspan=colspan
-                el.cr=cx+colspan
-                cx+=colspan
-                if el.tag=="label":
-                    el.maxw=len(el.attrib["string"])
-                    el.align="left"
-                    el.field=0
-                elif el.tag=="button":
-                    el.maxw=len(el.attrib["string"])+2
-                else:
-                    el.maxw=None
-                el.w=0
-                el.h=0
-                el.y=0
-                el.x=0
-                el.invisible=0
-                if cont.tag=="tree":
-                    leafs.append(el)
-                else:
-                    if el.tag in ("group","notebook","page"):
-                        init_elems(el)
-                    elif el.tag=="field":
-                        name=el.attrib["name"]
-                        fld=fields[name]
-                        if fld["type"] in ("one2many","many2many"):
-                            init_elems(el)
-                        else:
-                            leafs.append(el)
-                    else:
-                        leafs.append(el)
-            cont.row=cy+1
-            cont.invisible=0
-            if cont.tag=="notebook":
-                for el in cont[1:]:
-                    el.invisible=1
-            if cont.tag=="field":
-                name=el.attrib["name"]
-                fld=fields[name]
-                if fld["type"] in ("one2many","many2many"):
-                    el2=el.find("form")
-                    if el2:
-                        el2.invisible=1
-            if cont.tag!="tree":
-                i=0
-                todo=[]
-                for el in cont:
-                    if el.tag=="field" and not el.attrib.get("nolabel"):
-                        name=el.attrib["name"]
-                        fld=fields[name]
-                        el2=xml.etree.ElementTree.Element("label",{"string":fld["string"]})
-                        el2.colspan=1
-                        el2.cx=el.cx
-                        el2.cy=el.cy
-                        el2.cr=el.cx+1
-                        el2.w=el2.h=el2.y=el2.x=el2.invisible=0
-                        el2.maxw=len(el2.attrib["string"])+1
-                        el2.align="right"
-                        el2.field=1
-                        todo.append((el2,i))
-                        el.cx+=1
-                        el.colspan-=1
-                        i+=1
-                    i+=1
-                for el,i in todo:
-                    cont.insert(i,el)
-                    leafs.append(el)
-
-        def get_w(cont):
-            for el in cont:
-                if el.tag in ("group","notebook","page"):
-                    get_w(el)
-            colw=[0]
-            for cr in range(1,cont.col+1):
-                colw.append(colw[cr-1])
-                for el in cont:
-                    if el.cr!=cr:
-                        continue
-                    w=el.w+colw[el.cx]
-                    if el.cx>0:
-                        w+=1
-                    if w>colw[cr]:
-                        colw[cr]=w
-            cont.w=colw[-1]
-            if cont.tag=="notebook":
-                cont.w+=2
-            cont.colw=colw
-            return cont.w
-
-        def set_h(cont):
-            for el in cont:
-                if el.tag in ("button","label","separator"):
-                    el.h=1
-                elif el.tag=="field":
-                    name=el.attrib["name"]
-                    fld=fields[name]
-                    if fld["type"] in ("one2many","many2many"):
-                        el.h=10
-                    else:
-                        el.h=1
-                elif el.tag in ("group","notebook","page"):
-                    set_h(el)
-            cont.colh=[0]
-            for cy in range(cont.row):
-                h=0
-                for el in cont:
-                    if el.cy!=cy:
-                        continue
-                    if el.h>h:
-                        h=el.h
-                cont.colh.append(cont.colh[-1]+h)
-            cont.h=cont.colh[-1]
-
         def set_yx(cont):
             for el in cont:
                 el.y=cont.y+cont.bt+cont.colh[el.cy]
@@ -560,48 +596,6 @@ def act_window_form(act):
                     el.x+=1
                 if el.tag in ("group","notebook","page","field"):
                     set_yx(el)
-
-        def render(cont):
-            if cont.invisible:
-                return
-            for el in cont:
-                if el.tag=="field":
-                    name=el.attrib["name"]
-                    fld=fields[name]
-                    s=fld["string"]+":"
-                    if fld["type"] in ("one2many","many2many"):
-                        curses.textpad.rectangle(win,el.y,el.x,el.y+9,77)
-                        win.addstr(el.y,el.x+2,s)
-                        win.addstr(el.y+1,el.x+1,"Description   Qty")
-                        win.vline(el.y+1,el.x+13,curses.ACS_VLINE,8)
-                        win.addch(el.y,el.x+13,curses.ACS_TTEE)
-                        win.addch(el.y+9,el.x+13,curses.ACS_BTEE)
-                        win.vline(el.y+1,el.x+19,curses.ACS_VLINE,8)
-                        win.addch(el.y,el.x+19,curses.ACS_TTEE)
-                        win.addch(el.y+9,el.x+19,curses.ACS_BTEE)
-                    else:
-                        win.addstr(el.y,el.x," "*el.w,curses.A_UNDERLINE)
-                elif el.tag=="label":
-                    if el.field:
-                        s=el.attrib.get("string","")[:el.w-1]+":"
-                    else:
-                        s=el.attrib.get("string","")[:el.w]
-                    if el.align=="right":
-                        win.addstr(el.y,cont.x+cont.colw[el.cx+1]-len(s),s)
-                    else:
-                        win.addstr(el.y,el.x,s)
-                elif el.tag=="button":
-                    s="["+el.attrib.get("string","")[:el.w-2]+"]"
-                    win.addstr(el.y,el.x,s)
-                elif el.tag=="separator":
-                    s=el.attrib.get("string","")
-                    win.addstr(el.y,el.x,s)
-                elif el.tag=="notebook":
-                    curses.textpad.rectangle(win,el.y,el.x,21,78)
-                    s=el[0].attrib["string"]
-                    win.addstr(el.y,el.x+2,s)
-                if el.tag in ("group","notebook","page"):
-                    render(el)
 
         todo=[]
         for el in arch.findall("field"):
