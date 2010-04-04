@@ -89,36 +89,40 @@ def rpc_exec(*args):
     except Exception,e:
         raise Exception("RPC failed: %s\n%s"%(str(args),str(e)))
 
-class layout_region:
-    def __init__(self):
-        self.name=None
+class layout_region(object):
+    def __init__(self,colspan=4,maxw=-1,name="N/A",h=1,align="left"):
+        self.name=name
         self.cy=None
         self.cx=None
-        self.colspan=None
+        self.colspan=colspan
+        self.maxw=maxw
         self.x=None
         self.y=None
         self.w=None
-        self.h=None
-        self.maxw=None
+        self.h=h
+        self.is_container=False
+        self.align=align
+
+    def to_s(self,d=0):
+        return "  "*d+"name=%s cy=%s cx=%s colspan=%s maxw=%s h=%s w=%s y=%s x=%s"%(self.name,self.cy,self.cx,self.colspan,self.maxw,self.h,self.w,self.y,self.x)
 
 class layout_container(layout_region):
-    def __init__(self):
-        self.num_cols=None
-        self.num_rows=None
+    def __init__(self,colspan=4,col=4,name="N/A",borders=[0,0,0,0],seps=[0,1]):
+        super(layout_container,self).__init__(colspan,-1,name,h=None)
+        self.is_container=True
+        self.num_cols=col
+        self.num_rows=0
         self.widths=[]
         self.heights=[]
         self.childs=[]
         self.child_cx=0
         self.child_cy=0
-        self.border_t=0
-        self.border_l=0
-        self.border_b=0
-        self.border_r=0
-        self.border_v=0
-        self.border_h=0
-        super(container,self).__init__()
+        self.borders=borders
+        self.seps=seps
+        self.h_top=None
+        self.w_left=None
 
-    def add_region(self,el):
+    def add_child(self,el):
         if el.colspan>self.num_cols:
             raise Exception("invalid colspan")
         if self.child_cx+el.colspan>self.num_cols:
@@ -128,187 +132,274 @@ class layout_container(layout_region):
         el.cx=self.child_cx
         self.child_cx+=el.colspan
         self.childs.append(el)
+        self.num_rows=el.cy+1
 
-    def _set_maxw(self):
-        if self.maxw!=None:
+    def newline(self):
+        self.child_cy+=1
+        self.child_cx=0
+
+    def set_insert_pos(self,cx,cy):
+        self.child_cx=cx
+        self.child_cy=cy
+
+    def _compute_pass1(self):
+        if not self.childs:
             return
         for el in self.childs:
-            el._set_maxw(el)
+            if el.is_container:
+                el._compute_pass1()
+        # 1. compute container max width
+        expand=False
         for el in self.childs:
             if el.maxw==-1:
-                self.maxw=-1
-                return
-        w_left=[0]
-        for i in range(1,self.num_cols+1):
-            w_max=w_left[i-1]
+                expand=True
+                break
+        if expand:
+            self.maxw=-1
+        else:
+            w_left=[0]
+            for i in range(1,self.num_cols+1):
+                w_max=w_left[i-1]
+                for el in self.childs:
+                    cr=el.cx+el.colspan
+                    if cr!=i:
+                        continue
+                    w=w_left[el.cx]+el.maxw
+                    if el.cx>0:
+                        w+=self.seps[1]
+                    if w>w_max:
+                        w_max=w
+                w_left.append(w_max)
+            self.maxw=self.borders[3]+self.borders[1]+w_left[-1]
+        # 2. compute container height
+        self.h_top=[0]
+        for i in range(self.num_rows):
+            h=0
             for el in self.childs:
-                cr=el.cx+el.colspan
-                if cr!=i:
+                if el.cy!=i:
                     continue
-                w=w_left[el.cx]+self.border_v+(maxw and el.maxw or el.w)
-                if w>w_max:
-                    w_max=w
-            w_left.append(w_max)
-        self.maxw=self.border_l+self.border_r+self.border_v*(self.num_cols-1)+w_left[-1]
+                if el.h>h:
+                    h=el.h
+            h+=self.h_top[-1]
+            if i>0:
+                h+=self.seps[0]
+            self.h_top.append(h)
+        self.h=self.borders[0]+self.h_top[-1]+self.borders[2]
 
-    def _set_w(self,w):
-        w_avail=w-self.border_l-self.border_r-self.num_cols*self.border_v
+    def _compute_pass2(self):
+        if not self.childs:
+            self.w=0
+            return
+        # 1. compute child widths
+        w_avail=self.w-self.borders[3]-self.borders[1]
         for el in self.childs:
             el.w=0
         w_left=[0]*(self.num_cols+1)
         w_rest=w_avail
+        # allocate space fairly to every child
         while w_rest>0:
-            if w_rest>self.num_cols:
-                dw=w_rest/self.num_cols
+            w_alloc=w_rest-self.seps[1]*(self.num_cols-1)
+            if w_alloc>self.num_cols:
+                dw=w_alloc/self.num_cols
             else:
                 dw=1
             for el in self.childs:
-                if el.maxw:
+                if el.maxw!=-1:
                     if not el.w<el.maxw:
                         continue
                     dw_=min(dw,el.maxw-el.w)
                 else:
                     dw_=dw
                 el.w+=dw_
+                w=w_left[el.cx]+el.w
+                if el.cx>0:
+                    w+=self.seps[1]
                 cr=el.cx+el.colspan
-                if w_left[el.cx]+el.w>w_left[cr]:
-                    for i in range(cr,self.num_cols):
-                        w_left[i]+=dw_
-                    w_rest-=dw_
-                    if not w_rest:
+                if w>w_left[cr]:
+                    dwl=w-w_left[cr]
+                    for i in range(cr,self.num_cols+1):
+                        w_left[i]+=dwl
+                    w_rest=w_avail-w_left[-1]
+                    if w_rest==0:
                         break
         self.w_left=w_left
+        # add extra cell space to regions
         for el in self.childs:
-            el._set_w(el,el.w)
-
-    def _set_h(self):
-        if self.h!=None:
-            return
+            if el.maxw!=-1 and el.w==el.maxw:
+                continue
+            w=w_left[el.cx]+el.w
+            if el.cx>0:
+                w+=self.seps[1]
+            cr=el.cx+el.colspan
+            if w<w_left[cr]:
+                dw=w_left[cr]-w
+                if el.maxw!=-1:
+                    dw=min(dw,el.maxw-el.w)
+                el.w+=dw
+        # 2. compute child positions
         for el in self.childs:
-            el._set_h()
-        h=0
-        for i in range(self.num_rows):
-            rowh=0
-            for el in self.childs:
-                if el.cy!=i:
-                    continue
-                if el.h>rowh:
-                    rowh=el.h
-            h+=rowh
-        h+=(self.num_rows-1)*self.border_h
-
-    def _set_pos(self):
-        self.colx[0]=self.border_l
-        for i in range(1,el.num_cols):
-            self.colx[i]=self.colx[i-1]+self.colw[i-1]
-        self.rowy[0]=self.border_t
-        for i in range(1,el.num_rows):
-            self.rowy[i]=self.rowy[i-1]+self.rowy[i-1]
+            el.y=self.y+self.borders[0]+self.h_top[el.cy]+(el.cy>0 and self.seps[0] or 0)
+            if el.align=="right":
+                el.x=self.x+self.borders[3]+w_left[el.cx+el.colspan]-el.w
+            else:
+                el.x=self.x+self.borders[3]+w_left[el.cx]+(el.cx>0 and self.seps[1] or 0)
         for el in self.childs:
-            el.x=self.colx[el.cx]
-            el.y=self.rowy[el.cy]
-            el._set_pos()
+            if el.is_container:
+                el._compute_pass2()
 
-    def compute_pos(self,x,y,w):
-        self._set_maxw()
-        self._set_w(w)
-        self._set_h()
-        self._set_pos(x,y)
-        pass
+    def compute(self,w,x,y):
+        self._compute_pass1()
+        self.w=w
+        self.x=x
+        self.y=y
+        self._compute_pass2()
 
     def to_s(self,d=0):
-        s="  "*d+"name=%s cy=%d cx=%d colspan=%d num_cols=%d num_rows=%d h=%d w=%d y=%d x=%d"%(self.name,self.cy,self.cx,self.colspan,self.num_cols,self.num_rows,self.h,self.w,self.y,self.x)
+        s=super(layout_container,self).to_s(d)+" num_cols=%s num_rows=%s h_top=%s w_left=%s"%(self.num_cols,self.num_rows,str(self.h_top),str(self.w_left))
         for el in self.childs:
-            s+="\n"+self.to_s(d+1)
+            s+="\n"+el.to_s(d+1)
         return s
 
-def set_layout(cont):
-    cont.layout=container()
-    for el in cont:
-        if el.tag=="label":
-            colspan=el.attrib.get("colspan",1)
-            maxw=len(el.attrib.get("string",""))
-            el.layout=layout_region(colspan,maxw)
-            cont.layout.add_region(el.layout)
-        elif el.tag=="separator":
-            colspan=el.attrib.get("colspan",1)
-            maxw=None
-            el.layout=layout_region(colspan,maxw)
-            cont.layout.add_region(el.layout)
-        elif el.tag=="button":
-            colspan=el.attrib.get("colspan",1)
-            maxw=len(el.attrib.get("string",""))
-            el.layout=layout_region(colspan,maxw)
-            cont.layout.add_region(el.layout)
-        elif el.tag=="field":
-            if el.field["type"] in ("one2many","many2many"):
-                el.layout=set_layout(el)
-                cont.layout.add_region(el.layout)
-            else:
-                colspan=el.attrib.get("colspan",2)
-                colspan_label=1
-                colspab_input=colspan-1
-                maxw_label=len(el.field.get("string",""))+1
-                max_input=None
-                el.layout_label=layout_region(colspan_label,maxw_label)
-                el.layout_input=layout_region(colspan_input,maxw_input)
-                cont.layout.add_region(el.layout_label)
-                cont.layout.add_region(el.layout_input)
-        elif el.tag=="group":
-            el.layout=set_layout(el)
-            cont.layout.add_region(el.layout)
-        elif el.tag=="notebook":
-            el.layout=set_layout(el)
-            cont.layout.add_region(el.layout)
-        elif el.tag=="page":
-            el.layout=set_layout(el)
-            cont.layout.add_region(el.layout)
-    return cont.layout
+def set_view_regions(el):
+    for child in el:
+        set_view_regions(child)
 
-def render(cont):
-    for el in cont:
-        if el.invisible:
-            continue
-        if el.tag=="label":
-            l=el.layout
-            s=el.attrib.get("string","")[:l.w]
-            win.addstr(l.y,l.x,s)
-        elif el.tag=="separator":
-            l=el.layout
-            s=el.attrib.get("string","")
-            win.addstr(l.y,l.x,s)
-        elif el.tag=="button":
-            l=el.layout
-            s="["+el.attrib.get("string","")[:l.w-2]+"]"
-            win.addstr(l.y,l.x,s)
-        elif el.tag=="field":
-            s=el.field["string"]+":"
-            if fld["type"] in ("one2many","many2many"):
-                curses.textpad.rectangle(win,l.y,l.x,l.y+9,77)
-                win.addstr(l.y,l.x+2,s)
-                win.addstr(l.y+1,l.x+1,"Description   Qty")
-                win.vline(l.y+1,l.x+13,curses.ACS_VLINE,8)
-                win.addch(l.y,l.x+13,curses.ACS_TTEE)
-                win.addch(l.y+9,l.x+13,curses.ACS_BTEE)
-                win.vline(l.y+1,l.x+19,curses.ACS_VLINE,8)
-                win.addch(l.y,l.x+19,curses.ACS_TTEE)
-                win.addch(l.y+9,l.x+19,curses.ACS_BTEE)
+    if el.tag=="form":
+        colspan=int(el.attrib.get("colspan",1))
+        col=int(el.attrib.get("col",4))
+        el.region=layout_container(colspan=colspan,col=col,name="form",borders=[1,1,1,1])
+    elif el.tag=="tree":
+        pass
+    elif el.tag=="label":
+        colspan=int(el.attrib.get("colspan",1))
+        maxw=len(el.attrib.get("string",""))
+        el.region=layout_region(colspan,maxw,"label")
+    elif el.tag=="separator":
+        colspan=int(el.attrib.get("colspan",1))
+        maxw=-1
+        el.region=layout_region(colspan,maxw,"separator")
+    elif el.tag=="button":
+        states=el.attrib.get("states")
+        if not states or "draft" in states:
+            colspan=int(el.attrib.get("colspan",1))
+            maxw=len(el.attrib.get("string",""))+2
+            el.region=layout_region(colspan,maxw,"button")
+        else:
+            el.region=None
+            el.attrib["invisible"]=True
+    elif el.tag=="newline":
+        el.region=None
+    elif el.tag=="field":
+        colspan=int(el.attrib.get("colspan",2))
+        if el.attrib.get("nolabel"):
+            el.region_label=None
+            colspan_label=0
+        else:
+            maxw_label=len(el.field.get("string",""))+1
+            colspan_label=1
+            el.region_label=layout_region(colspan_label,maxw_label,"field_label",align="right")
+        colspan_input=colspan-colspan_label
+        maxw_input=-1
+        if el.field["type"] in ("one2many","many2many"):
+            h_input=10
+        else:
+            h_input=1
+        el.region_input=layout_region(colspan_input,maxw_input,el.attrib["name"],h=h_input)
+        el.region=None
+    elif el.tag=="group":
+        colspan=int(el.attrib.get("colspan",2))
+        col=int(el.attrib.get("col",4))
+        el.region=layout_container(colspan,col,"group")
+    elif el.tag=="notebook":
+        colspan=int(el.attrib.get("colspan",2))
+        el.region=layout_container(colspan,1,"notebook",borders=[1,1,1,1])
+    elif el.tag=="page":
+        colspan=int(el.attrib.get("colspan",1))
+        col=int(el.attrib.get("col",4))
+        el.region=layout_container(colspan,col,"page")
+    else:
+        raise Exception("invalid tag: "+el.tag)
+
+    page_no=0
+    for child in el:
+        if child.tag=="newline":
+            el.region.newline()
+        elif child.tag=="field":
+            if child.region_label:
+                el.region.add_child(child.region_label)
+            el.region.add_child(child.region_input)
+        elif child.tag=="page":
+            if page_no!=0:
+                child.attrib["invisible"]=True
+            el.region.set_insert_pos(0,0)
+            el.region.add_child(child.region)
+            page_no+=1
+        else:
+            if child.region:
+                el.region.add_child(child.region)
+    return el.region
+
+def draw_view(win,el):
+    if el.attrib.get("invisible"):
+        return
+    if el.tag=="form":
+        r=el.region
+        curses.textpad.rectangle(win,r.y,r.x,r.y+r.h-1,r.x+r.w-1)
+    elif el.tag=="tree":
+        pass
+    elif el.tag=="label":
+        r=el.region
+        s=el.attrib.get("string","")[:r.w]
+        win.addstr(r.y,r.x,s)
+    elif el.tag=="separator":
+        r=el.region
+        win.hline(r.y,r.x,curses.ACS_HLINE,r.w)
+        s=el.attrib.get("string","")
+        win.addstr(r.y,r.x+2,s)
+    elif el.tag=="button":
+        r=el.region
+        s="["+el.attrib.get("string","")[:r.w-2]+"]"
+        win.addstr(r.y,r.x,s)
+    elif el.tag=="field":
+        if el.region_label:
+            r=el.region_label
+            s=el.field["string"]
+            s=s[:r.w-1]+":"
+            win.addstr(r.y,r.x,s)
+        r=el.region_input
+        if el.field["type"] not in ("one2many","many2many"):
+            win.addstr(r.y,r.x," "*r.w,curses.A_UNDERLINE)
+    elif el.tag=="group":
+        pass
+    elif el.tag=="notebook":
+        r=el.region
+        curses.textpad.rectangle(win,r.y,r.x,r.y+r.h-1,r.x+r.w-1)
+        x=r.x+1
+        i=0
+        for page in el:
+            if i==0:
+                win.addch(r.y,x,curses.ACS_RTEE)
             else:
-                l=el.layout_label
-                s=el.attrib.get("string","")[:l.w-1]+":"
-                win.addstr(l.y,cont.x+cont.colw[l.cx+1]-len(s),s)
-                l=el.layout_input
-                win.addstr(l.y,l.x," "*l.w,curses.A_UNDERLINE)
-        elif el.tag=="group":
-            render(el)
-        elif el.tag=="notebook":
-            l=el.layout
-            curses.textpad.rectangle(win,l.y,l.x,21,78)
-            s=el[0].attrib["string"]
-            win.addstr(l.y,l.x+2,s)
-            render(el)
-        elif el.tag=="group":
-            render(el)
+                win.addch(r.y,x,curses.ACS_VLINE)
+            x+=1
+            s=page.attrib["string"]
+            win.addstr(r.y,x," "+s+" ")
+            x+=len(s)+2
+            i+=1
+        win.addch(r.y,x,curses.ACS_LTEE)
+    elif el.tag=="page":
+        pass
+    for child in el:
+        draw_view(win,child)
+
+def view_to_s(el,d=0):
+    s="  "*d+el.tag
+    for k in sorted(el.attrib.keys()):
+        v=el.attrib[k]
+        s+=" %s=%s"%(k,v)
+    for child in el:
+        s+="\n"+view_to_s(child,d+1)
+    return s
 
 def act_window_tree(act):
     #log("act_window_tree",act)
@@ -506,13 +597,14 @@ def act_window_form(act):
     fields=view["fields"]
     field_names=fields.keys()
     arch=xml.etree.ElementTree.fromstring(view["arch"])
+    for el in arch.getiterator("field"):
+        el.field=fields[el.attrib["name"]]
     ids=rpc_exec(model,"search",domain)
     objs=rpc_exec(model,"read",ids,["id"]+field_names)
     screen.clear()
     screen.addstr("1 Menu ")
     screen.addstr("2 "+act["name"]+" ",curses.A_REVERSE)
-    win=screen.subwin(23,80,1,0)
-    win.box()
+    pad=curses.newpad(100,80)
     if mode=="tree":
         win.hline(2,1,curses.ACS_HLINE,78)
         win.addch(2,0,curses.ACS_LTEE)
@@ -588,57 +680,19 @@ def act_window_form(act):
             x+=colw[name]
         screen.move(4,1)
     elif mode=="form":
-        def set_yx(cont):
-            for el in cont:
-                el.y=cont.y+cont.bt+cont.colh[el.cy]
-                el.x=cont.x+cont.bl+cont.colw[el.cx]
-                if el.cx>0:
-                    el.x+=1
-                if el.tag in ("group","notebook","page","field"):
-                    set_yx(el)
-
-        todo=[]
-        for el in arch.findall("field"):
-            name=el.attrib["name"]
-            fld=fields[name]
-            if fld["type"] in ("one2many","many2many"):
-                if not el.find("tree"):
-                    todo.append(el)
-        field_views={}
-        for el in todo:
-            name=el.attrib["name"]
-            fld=fields[name]
-            view=rpc_exec(fld["model"],"fields_view_get",None,"tree",{})
-            field_views[name]=view
-            el.append(view["arch"])
-
-        leafs=[]
-        init_elems(arch)
-        while 1:
-            incr=False
-            for el in leafs:
-                if el.maxw and el.w>=el.maxw:
-                    continue
-                el.w+=1
-                w=get_w(arch)
-                if w>78:
-                    el.w-=1
-                else:
-                    incr=True
-            if not incr:
-                break
-        1/0
-        set_h(arch)
-        arch.y=1
-        arch.x=1
-        set_yx(arch)
-        render(arch)
+        set_view_regions(arch)
+        arch.region.compute(80,0,0)
+        draw_view(pad,arch)
+        screen.refresh()
+        pad.refresh(0,0,1,0,23,80)
+        fld=arch.find(".//field")
+        if fld!=None:
+            r=fld.region_input
+            screen.move(1+r.y,r.x)
     else:
         raise Exception("view mode not implemented: "+mode)
-    screen.refresh()
     while 1:
         c=screen.getch()
-        1/0
         if c==curses.KEY_DOWN:
             y,x=screen.getyx()
             i=y-4
@@ -695,6 +749,7 @@ def start(stdscr):
     global screen
     screen=stdscr
     screen.keypad(1)
+    #curses.init_pair(1,curses.COLOR_RED,curses.COLOR_BLACK)
     user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
     action(user["action_id"][0])
 curses.wrapper(start)
