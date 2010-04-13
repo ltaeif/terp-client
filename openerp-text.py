@@ -1,7 +1,7 @@
 #!/usr/bin/python
 ##############################################################################
 #
-#    OpenERP Text-Mode Client
+#    OpenERP-Text: Text-Mode Client for OpenERP
 #    Copyright (C) 2010 David Janssens (david.j@almacom.co.th)
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -203,6 +203,7 @@ class layout_container(layout_region):
                 dw=w_alloc/self.num_cols
             else:
                 dw=1
+            incr=False
             for el in self.childs:
                 if el.maxw!=-1:
                     if not el.w<el.maxw:
@@ -211,6 +212,7 @@ class layout_container(layout_region):
                 else:
                     dw_=dw
                 el.w+=dw_
+                incr=True
                 w=w_left[el.cx]+el.w
                 if el.cx>0:
                     w+=self.seps[1]
@@ -222,6 +224,8 @@ class layout_container(layout_region):
                     w_rest=w_avail-w_left[-1]
                     if w_rest==0:
                         break
+            if not incr:
+                break
         self.w_left=w_left
         # add extra cell space to regions
         for el in self.childs:
@@ -260,16 +264,135 @@ class layout_container(layout_region):
             s+="\n"+el.to_s(d+1)
         return s
 
-def set_view_regions(el):
+class wigdet(object):
+    def __init__(self):
+        self.region=None
+        self.value=None
+
+    def process_key():
+        pass
+
+class container_widget(widget):
+    def __init__(self):
+        self.childs=[]
+
+    def add_child(widget):
+        self.childs.append(widget)
+
+class table(container_widget):
+    def __init__(self):
+        pass
+
+class input_widget(widget):
+    def __init__(self):
+        self.value=None
+
+class label(widget):
+    def __init__(self):
+        pass
+
+class button(widget):
+    def __init__(self):
+        pass
+
+class separator(widget):
+    def __init__(self):
+        pass
+
+class field(input_widget):
+    def __init__(self):
+        pass
+
+class char_field(field):
+    def __init__(self):
+        pass
+
+class integer_field(field):
+    def __init__(self):
+        pass
+
+class float_field(field):
+    def __init__(self):
+        pass
+
+class select_field(field):
+    def __init__(self):
+        pass
+
+class text_field(field):
+    def __init__(self):
+        pass
+
+class m2o_field(field):
+    def __init__(self):
+        pass
+
+class o2m_field(field,container_widget):
+    def __init__(self):
+        pass
+
+class m2m_field(field,container_widget):
+    def __init__(self):
+        pass
+
+class group(container_widget):
+    def __init__(self):
+        pass
+
+class notebook(container_widget):
+    def __init__(self):
+        pass
+
+class form(container_widget):
+    def __init__(self):
+        pass
+
+class listbox(container_widget):
+    def __init__(self):
+        pass
+
+class window(container_widget):
+    def __init__(self):
+        pass
+
+class tree_view(window):
+    def __init__(self):
+        pass
+
+class form_view(window):
+    def __init__(self):
+        pass
+
+class screen(container_widget):
+    def __init__(self):
+        pass
+
+def val_to_s(val,field):
+    if val==None or val==False:
+        return ""
+    if field["type"]=="many2one":
+        return val[1]
+    elif field["type"]=="selection":
+        for k,v in field["selection"]:
+            if k==val:
+                return v
+        raise Exception("invalid selection: %s"%k)
+    else:
+        return str(val)
+
+def set_view_regions(el,parent=None,objs=[]):
+    el.parent=parent
     for child in el:
-        set_view_regions(child)
+        set_view_regions(child,parent=el,objs=objs)
 
     if el.tag=="form":
         colspan=int(el.attrib.get("colspan",1))
         col=int(el.attrib.get("col",4))
         el.region=layout_container(colspan=colspan,col=col,name="form",borders=[1,1,1,1])
     elif el.tag=="tree":
-        pass
+        colspan=1
+        col=len(el)
+        el.region=layout_container(colspan=colspan,col=col,name="tree",borders=[1,1,1,1])
     elif el.tag=="label":
         colspan=int(el.attrib.get("colspan",1))
         maxw=len(el.attrib.get("string",""))
@@ -290,22 +413,43 @@ def set_view_regions(el):
     elif el.tag=="newline":
         el.region=None
     elif el.tag=="field":
-        colspan=int(el.attrib.get("colspan",2))
-        if el.attrib.get("nolabel"):
-            el.region_label=None
-            colspan_label=0
+        if parent.tag=="tree":
+            el.region=layout_container(colspan=1,col=1,name="field_col")
+            maxw_label=len(el.field.get("string",""))
+            if parent.parent:
+                h=1
+            else:
+                h=2
+            el.region_label=layout_region(1,maxw_label,"field_label",h=h)
+            el.region.add_child(el.region_label)
+            el.lines=[]
+            for obj in objs:
+                val=obj[el.attrib["name"]]
+                s=val_to_s(val,el.field)
+                r=layout_region(1,len(s),"field_line")
+                el.region.add_child(r)
+                el.lines.append({"region":r,"obj":obj})
         else:
-            maxw_label=len(el.field.get("string",""))+1
-            colspan_label=1
-            el.region_label=layout_region(colspan_label,maxw_label,"field_label",align="right")
-        colspan_input=colspan-colspan_label
-        maxw_input=-1
-        if el.field["type"] in ("one2many","many2many"):
-            h_input=10
-        else:
-            h_input=1
-        el.region_input=layout_region(colspan_input,maxw_input,el.attrib["name"],h=h_input)
-        el.region=None
+            colspan=int(el.attrib.get("colspan",2))
+            if el.attrib.get("nolabel"):
+                el.region_label=None
+                colspan_label=0
+            else:
+                maxw_label=len(el.field.get("string",""))+1
+                colspan_label=1
+                el.region_label=layout_region(colspan_label,maxw_label,"field_label",align="right")
+            colspan_input=colspan-colspan_label
+            if el.field["type"] in ("one2many","many2many"):
+                h_input=8
+                maxw_input=-1
+            else:
+                h_input=1
+                if el.field.get("readonly"):
+                    maxw_input=len(val_to_s(el.value,el.field))
+                else:
+                    maxw_input=-1
+            el.region_input=layout_region(colspan_input,maxw_input,el.attrib["name"],h=h_input)
+            el.region=None
     elif el.tag=="group":
         colspan=int(el.attrib.get("colspan",2))
         col=int(el.attrib.get("col",4))
@@ -325,9 +469,12 @@ def set_view_regions(el):
         if child.tag=="newline":
             el.region.newline()
         elif child.tag=="field":
-            if child.region_label:
-                el.region.add_child(child.region_label)
-            el.region.add_child(child.region_input)
+            if el.tag=="tree":
+                el.region.add_child(child.region)
+            else:
+                if child.region_label:
+                    el.region.add_child(child.region_label)
+                el.region.add_child(child.region_input)
         elif child.tag=="page":
             if page_no!=0:
                 child.attrib["invisible"]=True
@@ -339,14 +486,45 @@ def set_view_regions(el):
                 el.region.add_child(child.region)
     return el.region
 
-def draw_view(win,el):
+def draw_view(win,el,h=None):
     if el.attrib.get("invisible"):
-        return
+        return []
     if el.tag=="form":
         r=el.region
         curses.textpad.rectangle(win,r.y,r.x,r.y+r.h-1,r.x+r.w-1)
     elif el.tag=="tree":
-        pass
+        r=el.region
+        curses.textpad.rectangle(win,r.y,r.x,r.y+h-1,r.x+r.w-1)
+        i=0
+        for child in el:
+            rl=child.region_label
+            s=child.field["string"][:rl.w]
+            win.addstr(rl.y,rl.x,s)
+            rc=child.region
+            if i>0:
+                win.vline(r.y+1,rc.x-1,curses.ACS_VLINE,h-2)
+                win.addch(r.y,rc.x-1,curses.ACS_TTEE)
+                win.addch(r.y+h-1,rc.x-1,curses.ACS_BTEE)
+            i+=1
+        if not el.parent:
+            win.hline(r.y+2,r.x+1,curses.ACS_HLINE,r.w-2)
+            win.addch(r.y+2,r.x,curses.ACS_LTEE)
+            win.addch(r.y+2,r.x+r.w-1,curses.ACS_RTEE)
+            i=0
+            for child in el:
+                if i>0:
+                    rc=child.region
+                    win.addch(r.y+2,rc.x-1,curses.ACS_PLUS)
+                i+=1
+        for child in el:
+            name=child.attrib["name"]
+            for line in child.lines:
+                r=line["region"]
+                obj=line["obj"]
+                s=val_to_s(obj[name],child.field)
+                s=s[:r.w]
+                win.addstr(r.y,r.x,s)
+        return []
     elif el.tag=="label":
         r=el.region
         s=el.attrib.get("string","")[:r.w]
@@ -368,7 +546,17 @@ def draw_view(win,el):
             win.addstr(r.y,r.x,s)
         r=el.region_input
         if el.field["type"] not in ("one2many","many2many"):
-            win.addstr(r.y,r.x," "*r.w,curses.A_UNDERLINE)
+            s=val_to_s(el.value,el.field)
+            s=s[:r.w]
+            if el.field.get("readonly"):
+                if s:
+                    win.addstr(r.y,r.x,s)
+            else:
+                if len(s)<r.w:
+                    s+=" "*(r.w-len(s))
+                win.addstr(r.y,r.x,s,curses.A_UNDERLINE)
+        else:
+            return [el]
     elif el.tag=="group":
         pass
     elif el.tag=="notebook":
@@ -383,14 +571,20 @@ def draw_view(win,el):
                 win.addch(r.y,x,curses.ACS_VLINE)
             x+=1
             s=page.attrib["string"]
-            win.addstr(r.y,x," "+s+" ")
+            if page.attrib.get("invisible"):
+                win.addstr(r.y,x," "+s+" ")
+            else:
+                win.addstr(r.y,x," "+s+" ",curses.A_BOLD)
             x+=len(s)+2
             i+=1
         win.addch(r.y,x,curses.ACS_LTEE)
     elif el.tag=="page":
         pass
+    res=[]
     for child in el:
-        draw_view(win,child)
+        todo=draw_view(win,child)
+        res+=todo
+    return res
 
 def view_to_s(el,d=0):
     s="  "*d+el.tag
@@ -426,7 +620,7 @@ def act_window_tree(act):
     pad_r=curses.newpad(100,53)
     y=0
     for obj in objs_l:
-        win_l.addstr(y,1,obj["name"],curses.A_BOLD)
+        win_l.addstr(y,1,obj["name"])
         y+=1
     fields=view["fields"]
     field_names=fields.keys()
@@ -439,12 +633,12 @@ def act_window_tree(act):
         for obj in objs_r:
             obj["_depth"]=0
             obj["_expanded"]=False
-            pad_r.addstr(y,1,obj["name"],curses.A_BOLD)
+            pad_r.addstr(y,1,obj["name"])
             if obj[field_parent]:
                 pad_r.addch(y,0,"/")
             y+=1
     select_l=0
-    win_l.chgat(select_l,0,24,curses.A_REVERSE|curses.A_BOLD)
+    win_l.chgat(select_l,0,24,curses.A_REVERSE)
     screen.refresh()
     pad_r.refresh(0,0,4,26,22,78)
     screen.move(2,2)
@@ -559,9 +753,9 @@ def act_window_tree(act):
         elif c==ord("\n"):
             if mode=="l":
                 y,x=screen.getyx()
-                win_l.chgat(select_l,0,24,curses.A_BOLD)
+                win_l.chgat(select_l,0,24,0)
                 select_l=y-2
-                win_l.chgat(select_l,0,24,curses.A_REVERSE|curses.A_BOLD)
+                win_l.chgat(select_l,0,24,curses.A_REVERSE)
                 win_l.refresh()
 
                 pad_r.clear()
@@ -571,7 +765,7 @@ def act_window_tree(act):
                 for obj in objs_r:
                     obj["_depth"]=0
                     obj["_expanded"]=False
-                    pad_r.addstr(i,1,obj["name"],curses.A_BOLD)
+                    pad_r.addstr(i,1,obj["name"])
                     if obj[field_parent]:
                         pad_r.addch(i,0,"/")
                     i+=1
@@ -606,85 +800,54 @@ def act_window_form(act):
     screen.addstr("2 "+act["name"]+" ",curses.A_REVERSE)
     pad=curses.newpad(100,80)
     if mode=="tree":
-        win.hline(2,1,curses.ACS_HLINE,78)
-        win.addch(2,0,curses.ACS_LTEE)
-        win.addch(2,79,curses.ACS_RTEE)
-        headers=[]
-        for el in arch:
-            if el.tag!="field":
-                raise Exception("invalid tag")
-            name=el.attrib["name"]
-            headers.append(name)
-        n=len(headers)
-        w_avail=78-n+1
-        colmax={}
-        colw={}
-        for name in headers:
-            fld=fields[name]
-            #m=len(fld["string"])
-            m=0
-            for obj in objs:
-                if fld["type"] in ("char","integer","float","date","datetime"):
-                    val=str(obj[name])
-                elif fld["type"]=="many2one":
-                    val=obj[name][1]
-                elif fld["type"]=="selection":
-                    val=""
-                    for k,v in fld["selection"]:
-                        if k==obj[name]:
-                            val=v
-                            break
-                else:
-                    raise Exception("unexpected type:",fld["type"])
-                m=max(m,len(val))
-            colmax[name]=m
-            colw[name]=0
-        while w_avail>0:
-            for name in headers:
-                if not w_avail>0:
-                    break
-                if colw[name]<colmax[name]:
-                    colw[name]+=1
-                    w_avail-=1
-        first=True
-        x=1
-        for name in headers:
-            if first==True:
-                first=False
-            else:
-                win.vline(1,x,curses.ACS_VLINE,21)
-                win.addch(0,x,curses.ACS_TTEE)
-                win.addch(2,x,curses.ACS_PLUS)
-                win.addch(22,x,curses.ACS_BTEE)
-                x+=1
-            fld=fields[name]
-            win.addnstr(1,x,fld["string"],colw[name],curses.A_BOLD)
-            i=0
-            for obj in objs:
-                if i>18:
-                    break
-                if fld["type"] in ("char","integer","float","date","datetime"):
-                    val=str(obj[name])
-                elif fld["type"]=="many2one":
-                    val=obj[name][1]
-                elif fld["type"]=="selection":
-                    val=""
-                    for k,v in fld["selection"]:
-                        if k==obj[name]:
-                            val=v
-                            break
-                else:
-                    raise Exception("unexpected type:",fld["type"])
-                win.addnstr(3+i,x,val,colw[name])
-                i+=1
-            x+=colw[name]
-        screen.move(4,1)
-    elif mode=="form":
-        set_view_regions(arch)
+        set_view_regions(arch,objs=objs)
         arch.region.compute(80,0,0)
-        draw_view(pad,arch)
+        draw_view(pad,arch,23)
         screen.refresh()
         pad.refresh(0,0,1,0,23,80)
+        screen.move(4,1)
+    elif mode=="form":
+        defaults=rpc_exec(model,"default_get",field_names)
+        state=None
+        for el in arch.getiterator("field"):
+            val=defaults.get(el.attrib["name"])
+            if not val:
+                el.value=val
+                continue
+            if el.field["type"]=="many2one":
+                id,name=rpc_exec(el.field["relation"],"name_get",[val])[0]
+                el.value=(id,name)
+            else:
+                el.value=val
+            if el.attrib["name"]=="state":
+                state=el.value
+        for el in arch.getiterator("field"):
+            states=el.field.get("states")
+            if not states:
+                continue
+            vals=states.get(state)
+            if not vals:
+                continue
+            for k,v in vals:
+                el.field[k]=v
+        set_view_regions(arch)
+        arch.region.compute(80,0,0)
+        todo=draw_view(pad,arch)
+        screen.refresh()
+        pad.refresh(0,0,1,0,23,80)
+        for elf in todo:
+            view=elf.field["views"]["tree"]
+            et=xml.etree.ElementTree.fromstring(view["arch"])
+            view["et"]=et
+            for el in et.getiterator("field"):
+                el.field=view["fields"][el.attrib["name"]]
+            set_view_regions(et,elf)
+            r=elf.region_input
+            rf=et.region
+            rf.compute(r.w,0,0)
+            padf=curses.newpad(rf.h+10,rf.w+10)
+            draw_view(padf,et,r.h)
+            padf.refresh(0,0,r.y+1,r.x,r.y+r.h,r.x+r.w-1)
         fld=arch.find(".//field")
         if fld!=None:
             r=fld.region_input
@@ -693,6 +856,7 @@ def act_window_form(act):
         raise Exception("view mode not implemented: "+mode)
     while 1:
         c=screen.getch()
+        rdb.set_trace()
         if c==curses.KEY_DOWN:
             y,x=screen.getyx()
             i=y-4
