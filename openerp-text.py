@@ -64,6 +64,30 @@ def rpc_exec(*args):
     except Exception,e:
         raise Exception("RPC failed: %s\n%s"%(str(args),str(e)))
 
+def set_trace():
+    curses.nocbreak()
+    screen.keypad(0)
+    curses.echo()
+    curses.endwin()
+    pdb.set_trace()
+
+def eval_dom(dom,obj):
+    for (name,oper,param) in dom:
+        val=obj[name]
+        if oper=="=":
+            res=val==param
+        elif oper=="!=":
+            res=val!=param
+        elif oper=="in":
+            res=val in param
+        elif oper=="not in":
+            res=not val in param
+        else:
+            raise Exception("unsupported operator: %s"%oper)
+        if not res:
+            return False
+    return True
+
 class Widget(object):
     def __init__(self):
         self.x=None
@@ -75,6 +99,36 @@ class Widget(object):
         self.cx=None
         self.cy=None
         self.colspan=1
+        self.string=""
+        self.states=None
+        self.readonly=False
+        self.invisible=False
+        self.attrs={}
+
+    def set_attrib(self,attrib):
+        for k,v in attrib.items():
+            if k=="string":
+                self.string=v
+                self.set_maxw()
+            elif k=="colspan":
+                self.colspan=int(v)
+            elif k=="col":
+                self.num_cols=int(v)
+            elif k=="states":
+                self.states=v.split(",")
+            elif k=="readonly":
+                self.readonly=True
+            elif k=="attrs":
+                self.attrs=eval(v)
+
+    def set_vals(self,vals):
+        for attr,dom in self.attrs.items():
+            setattr(self,attr,eval_dom(dom,vals))
+        if self.states:
+            self.invisible=not vals["state"] in self.states
+
+    def set_maxw(self):
+        pass
 
     def to_s(self,d=0):
         s="  "*d
@@ -88,7 +142,7 @@ class Widget(object):
             s+=" %s=%s"%(name,str(val))
         return s
 
-    def draw(self):
+    def draw(self,win):
         pass
 
     def key_pressed(k):
@@ -108,14 +162,29 @@ class Panel(Widget):
             s+="\n"+c.to_s(d+1)
         return s
 
+    def _vis_childs(self):
+        for c in self._childs:
+            if c.invisible:
+                continue
+            yield c
+
+    def draw(self,win):
+        for c in self._vis_childs():
+            c.draw(win)
+
+    def set_vals(self,vals):
+        super(Panel,self).set_vals(vals)
+        for c in self._childs:
+            c.set_vals(vals)
+
 class Table(Panel):
     def __init__(self):
         super(Table,self).__init__()
         self.num_cols=4
         self.num_rows=0
         self._childs=[]
-        self.child_cx=0
-        self.child_cy=0
+        self._child_cx=0
+        self._child_cy=0
         self.borders=[0,0,0,0]
         self.seps=[0,1]
         self.h_top=None
@@ -124,32 +193,28 @@ class Table(Panel):
     def add(self,wg):
         if wg.colspan>self.num_cols:
             raise Exception("invalid colspan")
-        if self.child_cx+wg.colspan>self.num_cols:
-            self.child_cy+=1
-            self.child_cx=0
-        wg.cy=self.child_cy
-        wg.cx=self.child_cx
-        self.child_cx+=wg.colspan
+        if self._child_cx+wg.colspan>self.num_cols:
+            self._child_cy+=1
+            self._child_cx=0
+        wg.cy=self._child_cy
+        wg.cx=self._child_cx
+        self._child_cx+=wg.colspan
         self._childs.append(wg)
         self.num_rows=wg.cy+1
 
     def newline(self):
-        self.child_cy+=1
-        self.child_cx=0
-
-    def set_insert_pos(self,cx,cy):
-        self.child_cx=cx
-        self.child_cy=cy
+        self._child_cy+=1
+        self._child_cx=0
 
     def _compute_pass1(self):
         if not self._childs:
             return
-        for widget in self._childs:
+        for widget in self._vis_childs():
             if hasattr(widget,"_compute_pass1"):
                 widget._compute_pass1()
         # 1. compute container max width
         expand=False
-        for wg in self._childs:
+        for wg in self._vis_childs():
             if wg.maxw==-1:
                 expand=True
                 break
@@ -159,7 +224,7 @@ class Table(Panel):
             w_left=[0]
             for i in range(1,self.num_cols+1):
                 w_max=w_left[i-1]
-                for wg in self._childs:
+                for wg in self._vis_childs():
                     cr=wg.cx+wg.colspan
                     if cr!=i:
                         continue
@@ -174,7 +239,7 @@ class Table(Panel):
         self.h_top=[0]
         for i in range(self.num_rows):
             h=0
-            for wg in self._childs:
+            for wg in self._vis_childs():
                 if wg.cy!=i:
                     continue
                 if wg.h>h:
@@ -191,7 +256,7 @@ class Table(Panel):
             return
         # 1. compute child widths
         w_avail=self.w-self.borders[3]-self.borders[1]
-        for wg in self._childs:
+        for wg in self._vis_childs():
             wg.w=0
         w_left=[0]*(self.num_cols+1)
         w_rest=w_avail
@@ -203,7 +268,7 @@ class Table(Panel):
             else:
                 dw=1
             incr=False
-            for el in self._childs:
+            for wg in self._vis_childs():
                 if wg.maxw!=-1:
                     if not wg.w<wg.maxw:
                         continue
@@ -227,7 +292,7 @@ class Table(Panel):
                 break
         self.w_left=w_left
         # add extra cell space to regions
-        for wg in self._childs:
+        for wg in self._vis_childs():
             if wg.maxw!=-1 and wg.w==wg.maxw:
                 continue
             w=w_left[wg.cx]+wg.w
@@ -240,21 +305,21 @@ class Table(Panel):
                     dw=min(dw,wg.maxw-wg.w)
                 wg.w+=dw
         # 2. compute child positions
-        for wg in self._childs:
+        for wg in self._vis_childs():
             wg.y=self.y+self.borders[0]+self.h_top[wg.cy]+(wg.cy>0 and self.seps[0] or 0)
             if wg.align=="right":
                 wg.x=self.x+self.borders[3]+w_left[wg.cx+wg.colspan]-wg.w
             else:
                 wg.x=self.x+self.borders[3]+w_left[wg.cx]+(wg.cx>0 and self.seps[1] or 0)
-        for child in self._childs:
+        for child in self._vis_childs():
             if hasattr(child,"_compute_pass2"):
                 child._compute_pass2()
 
-    def compute(self,w,x,y):
+    def compute(self,w,y,x):
         self._compute_pass1()
         self.w=w
-        self.x=x
         self.y=y
+        self.x=x
         self._compute_pass2()
 
 class Form(Table):
@@ -262,48 +327,43 @@ class Form(Table):
         super(Form,self).__init__()
         self.string=""
 
-    def draw(self):
-        pass
+    def draw(self,win):
+        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        super(Form,self).draw(win)
 
 class Group(Table):
     def __init__(self):
         super(Group,self).__init__()
         self.string=""
 
-    def draw(self):
-        pass
-
-class Notebook(Panel):
+class Notebook(Table):
     def __init__(self):
         super(Notebook,self).__init__()
         self.cur_page=None
 
     def add(self,wg):
+        self._child_cx=0
         super(Notebook,self).add(wg)
         if self.cur_page==None:
             self.cur_page=0
 
-    def draw(self):
-        pass
+    def draw(self,win):
+        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        self._childs[self.cur_page].draw(win)
 
 class Page(Table):
     def __init__(self):
         super(Page,self).__init__()
         self.string=""
 
-    def draw(self):
-        pass
-
 class Label(Widget):
     def __init__(self):
         super(Label,self).__init__()
-        self.string=""
 
-    def set_string(self,string):
-        self.string=string
-        self.maxw=len(string)
+    def set_maxw(self):
+        self.maxw=len(self.string)
 
-    def draw(self):
+    def draw(self,win):
         win.addstr(self.y,self.x,self.string)
 
 class Separator(Widget):
@@ -311,119 +371,186 @@ class Separator(Widget):
         super(Separator,self).__init__()
         self.string=""
 
-    def draw(self):
+    def draw(self,win):
         pass
 
 class Button(Widget):
     def __init__(self):
         super(Button,self).__init__()
-        self.string=""
 
-    def draw(self):
+    def set_maxw(self):
+        self.maxw=len(self.string)+2
+
+    def draw(self,win):
         s="["+self.string[:self.w-2]+"]"
         win.addstr(self.y,self.x,s)
 
 class FieldLabel(Widget):
     def __init__(self):
         super(FieldLabel,self).__init__()
-        self.string=""
+        self.align="right"
 
-    def set_string(self,string):
-        self.string=string
-        self.maxw=len(string)+1
+    def set_maxw(self):
+        self.maxw=len(self.string)+1
 
-    def draw(self):
-        win.addstr(self.y,self.x,self.string)
+    def draw(self,win):
+        s=self.string[:self.w-1]
+        s+=":"
+        win.addstr(self.y,self.x,s)
 
-class InputChar(Widget):
+class Input(Widget):
+    def __init__(self):
+        super(Input,self).__init__()
+        self.name=None
+        self.value=False
+
+    def set_vals(self,vals):
+        super(Input,self).set_vals(vals)
+        if self.name in vals:
+            self.value=vals[self.name]
+
+class InputChar(Input):
     def __init__(self):
         super(InputChar,self).__init__()
         self.size=None
-        self.value=None
+        self.value=""
 
-    def draw(self):
-        s=self.value
-        if len(s)<self.w:
-            s+=" "*(self.w-len(s))
+    def draw(self,win):
+        if self.value!=False:
+            s=self.value[:self.w]
+        else:
+            s=""
+        s+=" "*(self.w-len(s))
         win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
     def validate(self,val):
         return val
 
-class InputInteger(InputChar):
-    def validate(self,val):
-        return int(val)
+class InputInteger(Input):
+    def __init__(self):
+        super(InputInteger,self).__init__()
+        self.maxw=9
 
-class InputFloat(InputChar):
-    def validate(self,val):
-        return float(val)
+    def draw(self,win):
+        if self.value!=False:
+            s=str(self.value)[:self.w]
+        else:
+            s=""
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
-class InputSelect(Widget):
+class InputFloat(Input):
+    def __init__(self):
+        super(InputFloat,self).__init__()
+        self.maxw=12
+
+    def draw(self,win):
+        if self.value!=False:
+            s=str(self.value)[:self.w]
+        else:
+            s=""
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+
+class InputSelect(Input):
     def __init__(self):
         super(InputSelect,self).__init__()
-        self.selection=None
+        self.selection=[]
 
-    def draw(self):
-        pass
+    def set_selection(self,sel):
+        self.selection=sel
+        self.maxw=0
+        for k,v in sel:
+            self.maxw=max(self.maxw,len(v))
 
-class InputText(Widget):
+    def draw(self,win):
+        if self.value!=False:
+            s=None
+            for k,v in self.selection:
+                if k==self.value:
+                    s=v
+                    break
+            if not s:
+                raise Exception("invalid selection value: %s"%self.value)
+            s=s[:self.w]
+        else:
+            s=""
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+
+class InputText(Input):
     def __init__(self):
         super(InputText,self).__init__()
-        self.value=None
+        self.height=5
 
-    def draw(self):
-        pass
+    def draw(self,win):
+        s=" "*self.w
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
-class InputBoolean(Widget):
+class InputBoolean(Input):
     def __init__(self):
         super(InputBoolean,self).__init__()
-        self.value=None
+        self.maxw=1
 
-    def draw(self):
-        pass
+    def draw(self,win):
+        s=(self.value and "Y" or "N")[:self.w]
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
-class InputDate(Widget):
+class InputDate(Input):
     def __init__(self):
         super(InputDate,self).__init__()
-        self.value=None
+        self.maxw=10
 
-    def draw(self):
-        pass
+    def draw(self,win):
+        if self.value!=False:
+            s=self.value[:self.w]
+        else:
+            s=""
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
-class InputM2O(Widget):
+class InputM2O(Input):
     def __init__(self):
         super(InputM2O,self).__init__()
-        self.value=None
 
-    def draw(self):
-        pass
+    def draw(self,win):
+        if self.value!=False:
+            s=self.value[1][:self.w]
+        else:
+            s=""
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
-class InputO2M(Widget):
+class InputO2M(Input):
     def __init__(self):
         super(InputO2M,self).__init__()
+        self.h=8
 
-    def draw(self):
+    def draw(self,win):
         pass
 
-class InputM2M(Widget):
+class InputM2M(Input):
     def __init__(self):
         super(InputM2M,self).__init__()
+        self.h=8
 
-    def draw(self):
+    def draw(self,win):
         pass
 
 def create_widget(el,panel=None):
     if el.tag=="form":
         wg=Form()
+        wg.borders=[1,1,1,1]
         for child in el:
-            create_widget(child,wg)
+            create_widget(child,panel=wg)
         return wg
     elif el.tag=="tree":
         wg=ListView()
         return wg
     elif el.tag=="label":
         wg=Label()
-        wg.set_string(el.attrib.get("string",""))
+        wg.set_attrib(el.attrib)
         panel.add(wg)
         return wg
     elif el.tag=="newline":
@@ -431,18 +558,21 @@ def create_widget(el,panel=None):
         return None
     elif el.tag=="separator":
         wg=Separator()
-        wg.string=el.attrib.get("string","")
+        wg.set_attrib(el.attrib)
         panel.add(wg)
         return wg
     elif el.tag=="button":
         wg=Button()
-        wg.string=el.attrib.get("string","")
+        wg.set_attrib(el.attrib)
         panel.add(wg)
         return wg
     elif el.tag=="field":
-        wg_l=FieldLabel()
-        wg_l.set_string(el.field.get("string",""))
-        panel.add(wg_l)
+        attrib={"string": el.field["string"]}
+        attrib.update(el.attrib)
+        if not el.attrib.get("nolabel"):
+            wg_l=FieldLabel()
+            wg_l.set_attrib(attrib)
+            panel.add(wg_l)
         if el.field["type"]=="char":
             wg=InputChar()
         elif el.field["type"]=="integer":
@@ -457,6 +587,7 @@ def create_widget(el,panel=None):
             wg=InputText()
         elif el.field["type"]=="selection":
             wg=InputSelect()
+            wg.set_selection(el.field["selection"])
         elif el.field["type"]=="many2one":
             wg=InputM2O()
         elif el.field["type"]=="one2many":
@@ -465,18 +596,24 @@ def create_widget(el,panel=None):
             wg=InputM2M()
         else:
             raise Exception("unsupported field type: %s"%el.field["type"])
+        wg.name=el.attrib["name"]
+        wg.set_attrib(attrib)
         panel.add(wg)
-        return (wg_l,wg)
+        return wg
     elif el.tag=="group":
         wg=Group()
+        wg.set_attrib(el.attrib)
         for child in el:
             create_widget(child,wg)
         panel.add(wg)
         return wg
     elif el.tag=="notebook":
         wg=Notebook()
+        wg.set_attrib(el.attrib)
+        wg.borders=[1,1,1,1]
         for elp in el:
             wg_p=Page()
+            wg_p.set_attrib(elp.attrib)
             wg.add(wg_p)
             for child in elp:
                 create_widget(child,wg_p)
@@ -692,43 +829,25 @@ def act_window_form(act):
     arch=xml.etree.ElementTree.fromstring(view["arch"])
     for el in arch.getiterator("field"):
         el.field=fields[el.attrib["name"]]
-    ids=rpc_exec(model,"search",domain)
-    objs=rpc_exec(model,"read",ids,["id"]+field_names)
     screen.clear()
     screen.addstr("1 Menu ")
     screen.addstr("2 "+act["name"]+" ",curses.A_REVERSE)
     pad=curses.newpad(100,80)
     if mode=="tree":
-        pass
+        ids=rpc_exec(model,"search",domain)
+        objs=rpc_exec(model,"read",ids,["id"]+field_names)
     elif mode=="form":
+        obj={}
         defaults=rpc_exec(model,"default_get",field_names)
-        state=None
-        for el in arch.getiterator("field"):
-            val=defaults.get(el.attrib["name"])
-            if not val:
-                el.value=val
-                continue
-            if el.field["type"]=="many2one":
-                id,name=rpc_exec(el.field["relation"],"name_get",[val])[0]
-                el.value=(id,name)
-            else:
-                el.value=val
-            if el.attrib["name"]=="state":
-                state=el.value
-        for el in arch.getiterator("field"):
-            states=el.field.get("states")
-            if not states:
-                continue
-            vals=states.get(state)
-            if not vals:
-                continue
-            for k,v in vals:
-                el.field[k]=v
+        for name,val in defaults.items():
+            if fields[name]["type"]=="many2one" and type(val)==type(1):
+                val=rpc_exec(fields[name]["relation"],"name_get",[val])[0]
+            obj[name]=val
         form=create_widget(arch)
-        form.compute(80,0,0)
-        1/0
+        form.set_vals(obj)
+        form.compute(80,1,0)
+        form.draw(screen)
         screen.refresh()
-        form.draw()
     else:
         raise Exception("view mode not implemented: "+mode)
     while 1:
