@@ -2,7 +2,7 @@
 ##############################################################################
 #
 #    OpenERP-Text: Text-Mode Client for OpenERP
-#    Copyright (C) 2010 David Janssens (david.j@almacom.co.th)
+#    Copyright (C) 2010 David Janssens <david.j@almacom.co.th>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -36,20 +36,20 @@ parser.add_option("-P","--port",dest="port",help="port number",metavar="HOST",de
 parser.add_option("-d","--db",dest="dbname",help="database",metavar="DB")
 parser.add_option("-u","--uid",dest="uid",help="user ID",metavar="UID",default=1)
 parser.add_option("-p","--passwd",dest="passwd",help="user password",metavar="PASSWD",default="admin")
+parser.add_option("--debug",action="store_true",dest="debug",help="debug mode",default=False)
 (opts,args)=parser.parse_args()
 
-host=opts.host
+if opts.debug:
+    def ex_info(type,value,tb):
+        traceback.print_exception(type,value,tb)
+        pdb.pm()
+    sys.excepthook=ex_info
+
+rpc=xmlrpclib.ServerProxy("http://%s:%d/xmlrpc/object"%(opts.host,opts.port))
+
 dbname=opts.dbname
 uid=opts.uid
 passwd=opts.passwd
-
-def ex_info(type,value,tb):
-    traceback.print_exception(type,value,tb)
-    pdb.pm()
-sys.excepthook=ex_info
-
-port=8069
-rpc=xmlrpclib.ServerProxy("http://%s:%d/xmlrpc/object"%(host,port))
 
 screen=None
 
@@ -95,6 +95,7 @@ class Widget(object):
         self.w=None
         self.h=1
         self.maxw=-1
+        self.borders=[0,0,0,0]
         self.align="left"
         self.cx=None
         self.cy=None
@@ -104,6 +105,7 @@ class Widget(object):
         self.readonly=False
         self.invisible=False
         self.attrs={}
+        self.can_focus=False
 
     def set_attrib(self,attrib):
         for k,v in attrib.items():
@@ -145,6 +147,11 @@ class Widget(object):
     def draw(self,win):
         pass
 
+    def get_focused(self):
+        if not self.can_focus:
+            return None
+        return self
+
     def key_pressed(k):
         pass
 
@@ -152,9 +159,12 @@ class Panel(Widget):
     def __init__(self):
         super(Panel,self).__init__()
         self._childs=[]
+        self._focused_wg=None
 
     def add(self,wg):
         self._childs.append(wg)
+        if not self._focused_wg and wg.can_focus:
+            self._focused_wg=wg
 
     def to_s(self,d=0):
         s=super(Panel,self).to_s(d)
@@ -177,6 +187,52 @@ class Panel(Widget):
         for c in self._childs:
             c.set_vals(vals)
 
+    def get_focused(self):
+        if not self._focused_wg:
+            return self
+        return self._focused_wg.get_focused()
+
+class DeckPanel(Panel):
+    def __init__(self):
+        super(DeckPanel,self).__init__()
+        self.cur_wg=None
+
+    def add(self,wg):
+        super(DeckPanel,self).add(wg)
+        if self.cur_wg==None:
+            self.cur_wg=wg
+
+    def _compute_pass1(self):
+        if not self._childs:
+            return
+        for wg in self._vis_childs():
+            if hasattr(wg,"_compute_pass1"):
+                wg._compute_pass1()
+        maxws=[wg.maxw for wg in self._vis_childs()]
+        if -1 in maxws:
+            self.maxw=-1
+        else:
+            self.maxw=max(maxws)+self.borders[1]+self.borders[3]
+        self.h=max([wg.h for wg in self._vis_childs()])+self.borders[0]+self.borders[2]
+
+    def _compute_pass2(self):
+        w=self.w-self.borders[1]-self.borders[3]
+        for wg in self._vis_childs():
+            if wg.maxw==-1:
+                wg.w=w
+            else:
+                wg.w=min(w,wg.maxw)
+            wg.y=self.y+self.borders[0]
+            wg.x=self.x+self.borders[3]
+        for wg in self._vis_childs():
+            if hasattr(wg,"_compute_pass2"):
+                wg._compute_pass2()
+
+    def draw(self,win):
+        if not self.cur_wg:
+            return
+        self.cur_wg.draw(win)
+
 class Table(Panel):
     def __init__(self):
         super(Table,self).__init__()
@@ -185,7 +241,6 @@ class Table(Panel):
         self._childs=[]
         self._child_cx=0
         self._child_cy=0
-        self.borders=[0,0,0,0]
         self.seps=[0,1]
         self.h_top=None
         self.w_left=None
@@ -325,6 +380,7 @@ class Table(Panel):
 class Form(Table):
     def __init__(self):
         super(Form,self).__init__()
+        self.relation=None
         self.string=""
 
     def draw(self,win):
@@ -336,25 +392,99 @@ class Group(Table):
         super(Group,self).__init__()
         self.string=""
 
-class Notebook(Table):
+class Notebook(DeckPanel):
     def __init__(self):
         super(Notebook,self).__init__()
-        self.cur_page=None
-
-    def add(self,wg):
-        self._child_cx=0
-        super(Notebook,self).add(wg)
-        if self.cur_page==None:
-            self.cur_page=0
+        self.can_focus=True
 
     def draw(self,win):
         curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
-        self._childs[self.cur_page].draw(win)
+        x=self.x+1
+        i=0
+        for wg in self._childs:
+            if i==0:
+                win.addch(self.y,x,curses.ACS_RTEE)
+            else:
+                win.addch(self.y,x,curses.ACS_VLINE)
+            x+=1
+            s=" "+wg.string+" "
+            if self.cur_wg==wg:
+                win.addstr(self.y,x,s,curses.A_BOLD)
+            else:
+                win.addstr(self.y,x,s)
+            x+=len(s)
+            i+=1
+        win.addch(self.y,x,curses.ACS_LTEE)
+        super(Notebook,self).draw(win)
 
 class Page(Table):
     def __init__(self):
         super(Page,self).__init__()
-        self.string=""
+
+class ListView(Widget):
+    def __init__(self):
+        super(ListView,self).__init__()
+        self.relation=None
+        self.headers=[]
+        self.sep=1
+        self.h=8
+        self.borders=[1,1,1,1]
+
+    def _compute_pass1(self):
+        self.num_cols=len(self.headers)
+        self.col_maxw=[]
+        for name,string in self.headers:
+            self.col_maxw.append(len(string))
+        self.maxw=-1
+
+    def _compute_pass2(self):
+        self.col_w=[0]*self.num_cols
+        w_avail=self.w-self.borders[3]-self.borders[1]
+        w_rest=w_avail
+        while w_rest>0:
+            w_alloc=w_rest-self.sep*(self.num_cols-1)
+            if w_alloc>self.num_cols:
+                dw=w_alloc/self.num_cols
+            else:
+                dw=1
+            incr=False
+            for i in range(self.num_cols):
+                maxw=self.col_maxw[i]
+                if maxw!=-1:
+                    colw=self.col_w[i]
+                    if not colw<maxw:
+                        continue
+                    dw_=min(dw,maxw-colw)
+                else:
+                    dw_=dw
+                self.col_w[i]+=dw_
+                w_rest-=dw_
+                incr=True
+                if not w_rest:
+                    break
+            if not incr:
+                break
+        self.col_x=[self.x+self.borders[3]]
+        for i in range(1,self.num_cols):
+            self.col_x.append(self.col_x[i-1]+self.col_w[i-1]+self.sep)
+
+    def draw(self,win):
+        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        for i in range(1,self.num_cols):
+            x=self.col_x[i]-1
+            win.vline(self.y+1,x,curses.ACS_VLINE,self.h-2)
+            win.addch(self.y,x,curses.ACS_TTEE)
+            win.addch(self.y+self.h-1,x,curses.ACS_BTEE)
+        for i in range(self.num_cols):
+            name,string=self.headers[i]
+            s=string[:self.col_w[i]]
+            win.addstr(self.y+1,self.col_x[i],s)
+
+class TreeView(Widget):
+    def __init__(self):
+        super(TreeView,self).__init__()
+        self.relation=None
+        self.headers=[]
 
 class Label(Widget):
     def __init__(self):
@@ -403,6 +533,7 @@ class Input(Widget):
         super(Input,self).__init__()
         self.name=None
         self.value=False
+        self.can_focus=True
 
     def set_vals(self,vals):
         super(Input,self).set_vals(vals)
@@ -510,9 +641,23 @@ class InputDate(Input):
         s+=" "*(self.w-len(s))
         win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
+class InputDatetime(Input):
+    def __init__(self):
+        super(InputDatetime,self).__init__()
+        self.maxw=19
+
+    def draw(self,win):
+        if self.value!=False:
+            s=self.value[:self.w]
+        else:
+            s=""
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+
 class InputM2O(Input):
     def __init__(self):
         super(InputM2O,self).__init__()
+        self.relation=None
 
     def draw(self,win):
         if self.value!=False:
@@ -522,31 +667,48 @@ class InputM2O(Input):
         s+=" "*(self.w-len(s))
         win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
 
-class InputO2M(Input):
+class InputO2M(DeckPanel):
     def __init__(self):
         super(InputO2M,self).__init__()
-        self.h=8
+        self.relation=None
+        self.tree=None
+        self.form=None
 
-    def draw(self,win):
-        pass
+    def add(self,wg,type="tree"):
+        super(InputO2M,self).add(wg)
+        if type=="tree":
+            self.tree=wg
+        elif type=="form":
+            self.form=wg
+        else:
+            raise Exception("Unsupported view type: %s"%type)
 
-class InputM2M(Input):
+    def _compute_pass1(self):
+        super(InputO2M,self)._compute_pass1()
+        self.h=self.tree.h
+
+class InputM2M(Panel):
     def __init__(self):
         super(InputM2M,self).__init__()
         self.h=8
+        self.relation=None
 
     def draw(self,win):
         pass
 
-def create_widget(el,panel=None):
+def create_widget(el,panel=None,fields=None):
     if el.tag=="form":
         wg=Form()
         wg.borders=[1,1,1,1]
         for child in el:
-            create_widget(child,panel=wg)
+            create_widget(child,panel=wg,fields=fields)
         return wg
     elif el.tag=="tree":
         wg=ListView()
+        for child in el:
+            name=child.attrib["name"]
+            field=fields[name]
+            wg.headers.append((name,field["string"]))
         return wg
     elif el.tag=="label":
         wg=Label()
@@ -567,35 +729,59 @@ def create_widget(el,panel=None):
         panel.add(wg)
         return wg
     elif el.tag=="field":
-        attrib={"string": el.field["string"]}
+        field=fields[el.attrib["name"]]
+        attrib={"string": field["string"]}
         attrib.update(el.attrib)
         if not el.attrib.get("nolabel"):
             wg_l=FieldLabel()
             wg_l.set_attrib(attrib)
             panel.add(wg_l)
-        if el.field["type"]=="char":
+        if field["type"]=="char":
             wg=InputChar()
-        elif el.field["type"]=="integer":
+        elif field["type"]=="integer":
             wg=InputInteger()
-        elif el.field["type"]=="float":
+        elif field["type"]=="float":
             wg=InputFloat()
-        elif el.field["type"]=="boolean":
+        elif field["type"]=="boolean":
             wg=InputBoolean()
-        elif el.field["type"]=="date":
+        elif field["type"]=="date":
             wg=InputDate()
-        elif el.field["type"]=="text":
+        elif field["type"]=="datetime":
+            wg=InputDatetime()
+        elif field["type"]=="text":
             wg=InputText()
-        elif el.field["type"]=="selection":
+        elif field["type"]=="selection":
             wg=InputSelect()
-            wg.set_selection(el.field["selection"])
-        elif el.field["type"]=="many2one":
+            wg.set_selection(field["selection"])
+        elif field["type"]=="many2one":
             wg=InputM2O()
-        elif el.field["type"]=="one2many":
+        elif field["type"]=="one2many":
             wg=InputO2M()
-        elif el.field["type"]=="many2many":
+            tree_view=field["views"].get("tree")
+            if not tree_view:
+                tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
+            tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
+            wg_t=create_widget(tree_arch,fields=tree_view["fields"])
+            wg_t.relation=field["relation"]
+            wg.add(wg_t,"tree")
+            form_view=field["views"].get("form")
+            if not form_view:
+                form_view=rpc_exec(field["relation"],"fields_view_get",False,"form",{})
+            form_arch=xml.etree.ElementTree.fromstring(form_view["arch"])
+            wg_f=create_widget(form_arch,fields=form_view["fields"])
+            wg_f.relation=field["relation"]
+            wg.add(wg_f,"form")
+        elif field["type"]=="many2many":
             wg=InputM2M()
+            tree_view=field["views"].get("tree")
+            if not tree_view:
+                tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
+            tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
+            wg_t=create_widget(tree_arch,fields=tree_view["fields"])
+            wg_t.relation=field["relation"]
+            wg.add(wg_t)
         else:
-            raise Exception("unsupported field type: %s"%el.field["type"])
+            raise Exception("unsupported field type: %s"%field["type"])
         wg.name=el.attrib["name"]
         wg.set_attrib(attrib)
         panel.add(wg)
@@ -604,7 +790,7 @@ def create_widget(el,panel=None):
         wg=Group()
         wg.set_attrib(el.attrib)
         for child in el:
-            create_widget(child,wg)
+            create_widget(child,wg,fields=fields)
         panel.add(wg)
         return wg
     elif el.tag=="notebook":
@@ -616,7 +802,7 @@ def create_widget(el,panel=None):
             wg_p.set_attrib(elp.attrib)
             wg.add(wg_p)
             for child in elp:
-                create_widget(child,wg_p)
+                create_widget(child,wg_p,fields=fields)
         panel.add(wg)
         return wg
     else:
@@ -827,8 +1013,6 @@ def act_window_form(act):
     fields=view["fields"]
     field_names=fields.keys()
     arch=xml.etree.ElementTree.fromstring(view["arch"])
-    for el in arch.getiterator("field"):
-        el.field=fields[el.attrib["name"]]
     screen.clear()
     screen.addstr("1 Menu ")
     screen.addstr("2 "+act["name"]+" ",curses.A_REVERSE)
@@ -843,10 +1027,12 @@ def act_window_form(act):
             if fields[name]["type"]=="many2one" and type(val)==type(1):
                 val=rpc_exec(fields[name]["relation"],"name_get",[val])[0]
             obj[name]=val
-        form=create_widget(arch)
+        form=create_widget(arch,fields=fields)
         form.set_vals(obj)
         form.compute(80,1,0)
         form.draw(screen)
+        wg=form.get_focused()
+        screen.move(wg.y,wg.x)
         screen.refresh()
     else:
         raise Exception("view mode not implemented: "+mode)
