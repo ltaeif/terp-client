@@ -48,10 +48,13 @@ if opts.debug:
 rpc=xmlrpclib.ServerProxy("http://%s:%d/xmlrpc/object"%(opts.host,opts.port))
 
 dbname=opts.dbname
+if not dbname:
+    raise Exception("Missing dbname")
 uid=opts.uid
 passwd=opts.passwd
 
 screen=None
+tab_panel=None
 
 def log(*args):
     msg=" ".join([str(a) for a in args])
@@ -62,7 +65,7 @@ def rpc_exec(*args):
     try:
         return rpc.execute(dbname,uid,passwd,*args)
     except Exception,e:
-        raise Exception("RPC failed: %s\n%s"%(str(args),str(e)))
+        raise Exception("RPC failed: %s %s %s %s\n%s"%(dbname,uid,passwd,str(args),str(e)))
 
 def set_trace():
     curses.nocbreak()
@@ -99,38 +102,50 @@ class Widget(object):
         self.align="left"
         self.cx=None
         self.cy=None
+        self.can_focus=False
+        self.has_focus=False
+        self.field_attrs={}
+        self.states_f={}
+        self.view_attrs={}
+        self.states_v=None
+        self.attrs_v={}
         self.colspan=1
         self.string=""
-        self.states=None
         self.readonly=False
         self.invisible=False
-        self.attrs={}
-        self.can_focus=False
+        self.states=None
 
-    def set_attrib(self,attrib):
-        for k,v in attrib.items():
-            if k=="string":
-                self.string=v
-                self.set_maxw()
-            elif k=="colspan":
-                self.colspan=int(v)
-            elif k=="col":
-                self.num_cols=int(v)
+    def set_field_attrs(self,attrs):
+        for k,v in attrs.items():
+            if k in ("string","readonly","states","size","select","required","domain","relation","context","digits","change_default","help","selection"):
+                self.field_attrs[k]=v
+            elif k in ("views","type"):
+                pass
+            else:
+                raise Exception("unsupported field attribute: %s"%k)
+        for k,v in self.field_attrs.items():
+            setattr(self,k,v)
+
+    def set_view_attrs(self,attrs):
+        for k,v in attrs.items():
+            if k in ("string","name","on_change","domain","context","type","widget","mode","sum","icon","default_get"):
+                val=v
+            elif k in ("colspan","col"):
+                val=int(v)
+            elif k in ("readonly","select","required","nolabel","invisible"):
+                val=eval(v) and True or False
             elif k=="states":
-                self.states=v.split(",")
-            elif k=="readonly":
-                self.readonly=True
+                val=v.split(",")
             elif k=="attrs":
-                self.attrs=eval(v)
+                val=eval(v)
+            else:
+                raise Exception("unsupported view attribute: %s"%k)
+            self.view_attrs[k]=val
+        for k,v in self.view_attrs.items():
+            setattr(self,k,v)
 
     def set_vals(self,vals):
-        for attr,dom in self.attrs.items():
-            setattr(self,attr,eval_dom(dom,vals))
-        if self.states:
-            self.invisible=not vals["state"] in self.states
-
-    def set_maxw(self):
-        pass
+        self.update_attrs(vals)
 
     def to_s(self,d=0):
         s="  "*d
@@ -147,12 +162,26 @@ class Widget(object):
     def draw(self,win):
         pass
 
-    def get_focused(self):
-        if not self.can_focus:
+    def set_focus(self):
+        if self.can_focus and not self.readonly:
+            self.has_focus=True
+            screen.move(self.y,self.x)
+            return self
+        else:
             return None
-        return self
 
-    def key_pressed(k):
+    def get_focused(self):
+        if self.has_focus:
+            return self
+        return None
+
+    def get_tabindex(self):
+        if self.can_focus and not self.readonly:
+            return [self]
+        else:
+            return []
+
+    def key_pressed(self,k):
         pass
 
 class Panel(Widget):
@@ -178,6 +207,13 @@ class Panel(Widget):
                 continue
             yield c
 
+    def compute(self,w,y,x):
+        self._compute_pass1()
+        self.w=w
+        self.y=y
+        self.x=x
+        self._compute_pass2()
+
     def draw(self,win):
         for c in self._vis_childs():
             c.draw(win)
@@ -187,10 +223,30 @@ class Panel(Widget):
         for c in self._childs:
             c.set_vals(vals)
 
+    def set_focus(self):
+        wg_f=super(Panel,self).set_focus()
+        if wg_f:
+            return wg_f
+        for wg in self._childs:
+            wg_f=wg.set_focus()
+            if wg_f:
+                return wg_f
+        return None
+
     def get_focused(self):
-        if not self._focused_wg:
+        if self.has_focus:
             return self
-        return self._focused_wg.get_focused()
+        for wg in self._childs:
+            wg_f=wg.get_focused()
+            if wg_f:
+                return wg_f
+        return None
+
+    def get_tabindex(self):
+        ind=super(Panel,self).get_tabindex()
+        for wg in self._vis_childs():
+            ind+=wg.get_tabindex()
+        return ind
 
 class DeckPanel(Panel):
     def __init__(self):
@@ -233,10 +289,42 @@ class DeckPanel(Panel):
             return
         self.cur_wg.draw(win)
 
+    def set_focus(self):
+        wg_f=Widget.set_focus(self)
+        if wg_f:
+            return wg_f
+        if self.cur_wg:
+            wg_f=self.cur_wg.set_focus()
+            if wg_f:
+                return wg_f
+        return None
+
+    def get_focused(self):
+        if self.has_focus:
+            return self
+        if self.cur_wg:
+            wg_f=self.cur_wg.get_focused()
+            if wg_f:
+                return wg_f
+        return None
+
+    def get_tabindex(self):
+        ind=Widget.get_tabindex(self)
+        if self.cur_wg:
+            ind+=self.cur_wg.get_tabindex()
+        return ind
+
+class HorizontalPanel(Panel):
+    def __init__(self):
+        super(HorizontalPanel,self).__init__()
+
+    def draw(self,win):
+        pass
+
 class Table(Panel):
     def __init__(self):
         super(Table,self).__init__()
-        self.num_cols=4
+        self.col=4
         self.num_rows=0
         self._childs=[]
         self._child_cx=0
@@ -246,9 +334,9 @@ class Table(Panel):
         self.w_left=None
 
     def add(self,wg):
-        if wg.colspan>self.num_cols:
+        if wg.colspan>self.col:
             raise Exception("invalid colspan")
-        if self._child_cx+wg.colspan>self.num_cols:
+        if self._child_cx+wg.colspan>self.col:
             self._child_cy+=1
             self._child_cx=0
         wg.cy=self._child_cy
@@ -277,7 +365,7 @@ class Table(Panel):
             self.maxw=-1
         else:
             w_left=[0]
-            for i in range(1,self.num_cols+1):
+            for i in range(1,self.col+1):
                 w_max=w_left[i-1]
                 for wg in self._vis_childs():
                     cr=wg.cx+wg.colspan
@@ -313,13 +401,13 @@ class Table(Panel):
         w_avail=self.w-self.borders[3]-self.borders[1]
         for wg in self._vis_childs():
             wg.w=0
-        w_left=[0]*(self.num_cols+1)
+        w_left=[0]*(self.col+1)
         w_rest=w_avail
         # allocate space fairly to every child
         while w_rest>0:
-            w_alloc=w_rest-self.seps[1]*(self.num_cols-1)
-            if w_alloc>self.num_cols:
-                dw=w_alloc/self.num_cols
+            w_alloc=w_rest-self.seps[1]*(self.col-1)
+            if w_alloc>self.col:
+                dw=w_alloc/self.col
             else:
                 dw=1
             incr=False
@@ -338,7 +426,7 @@ class Table(Panel):
                 cr=wg.cx+wg.colspan
                 if w>w_left[cr]:
                     dwl=w-w_left[cr]
-                    for i in range(cr,self.num_cols+1):
+                    for i in range(cr,self.col+1):
                         w_left[i]+=dwl
                     w_rest=w_avail-w_left[-1]
                     if w_rest==0:
@@ -370,22 +458,60 @@ class Table(Panel):
             if hasattr(child,"_compute_pass2"):
                 child._compute_pass2()
 
-    def compute(self,w,y,x):
-        self._compute_pass1()
-        self.w=w
-        self.y=y
-        self.x=x
-        self._compute_pass2()
-
 class Form(Table):
     def __init__(self):
         super(Form,self).__init__()
         self.relation=None
         self.string=""
 
+    def update_attrs(self,vals):
+        state=vals.get("state")
+        update=("readonly","required","invisible")
+        for k,v in self.field_attrs.items():
+            if k in update:
+                setattr(self,k,v)
+        states=self.field_attrs.get("states")
+        if states and state in states:
+            for k,v in states[state]:
+                if k in update:
+                    setattr(self,k,v)
+                else:
+                    raise Exception("attribute can not be updated: %s"%k)
+        for k,v in self.view_attrs.items():
+            if k in update:
+                setattr(self,k,v)
+        states=self.view_attrs.get("states")
+        if states!=None:
+            self.invisible=not state in states
+        attrs=self.view_attrs.get("attrs")
+        if attrs:
+            for k,dom in attrs.items():
+                if k in update:
+                    setattr(self,k,eval_dom(dom,vals))
+                else:
+                    raise Exception("attribute can not be updated: %s"%k)
+
     def draw(self,win):
         curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
         super(Form,self).draw(win)
+
+    def key_pressed(self,k):
+        wg_f=self.get_focused()
+        if k in (ord("\t"),curses.KEY_DOWN):
+            ind=self.get_tabindex()
+            i=ind.index(wg_f)
+            i=(i+1)%len(ind)
+            ind[i].set_focus()
+            wg_f.has_focus=False
+        elif k==curses.KEY_UP:
+            ind=self.get_tabindex()
+            i=ind.index(wg_f)
+            i=(i-1)%len(ind)
+            ind[i].set_focus()
+            wg_f.has_focus=False
+        else:
+            set_trace()
+            wg_f.key_pressed(k)
 
 class Group(Table):
     def __init__(self):
@@ -417,6 +543,12 @@ class Notebook(DeckPanel):
         win.addch(self.y,x,curses.ACS_LTEE)
         super(Notebook,self).draw(win)
 
+    def set_focus(self):
+        wg=super(Notebook,self).set_focus()
+        if not wg:
+            return None
+        screen.move(self.y,self.x+3)
+
 class Page(Table):
     def __init__(self):
         super(Page,self).__init__()
@@ -429,26 +561,30 @@ class ListView(Widget):
         self.sep=1
         self.h=8
         self.borders=[1,1,1,1]
+        self.can_focus=True
+
+    def update_attrs(self,vals):
+        pass
 
     def _compute_pass1(self):
-        self.num_cols=len(self.headers)
+        self.col=len(self.headers)
         self.col_maxw=[]
         for name,string in self.headers:
             self.col_maxw.append(len(string))
         self.maxw=-1
 
     def _compute_pass2(self):
-        self.col_w=[0]*self.num_cols
+        self.col_w=[0]*self.col
         w_avail=self.w-self.borders[3]-self.borders[1]
         w_rest=w_avail
         while w_rest>0:
-            w_alloc=w_rest-self.sep*(self.num_cols-1)
-            if w_alloc>self.num_cols:
-                dw=w_alloc/self.num_cols
+            w_alloc=w_rest-self.sep*(self.col-1)
+            if w_alloc>self.col:
+                dw=w_alloc/self.col
             else:
                 dw=1
             incr=False
-            for i in range(self.num_cols):
+            for i in range(self.col):
                 maxw=self.col_maxw[i]
                 if maxw!=-1:
                     colw=self.col_w[i]
@@ -465,32 +601,61 @@ class ListView(Widget):
             if not incr:
                 break
         self.col_x=[self.x+self.borders[3]]
-        for i in range(1,self.num_cols):
+        for i in range(1,self.col):
             self.col_x.append(self.col_x[i-1]+self.col_w[i-1]+self.sep)
 
     def draw(self,win):
         curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
-        for i in range(1,self.num_cols):
+        for i in range(1,self.col):
             x=self.col_x[i]-1
             win.vline(self.y+1,x,curses.ACS_VLINE,self.h-2)
             win.addch(self.y,x,curses.ACS_TTEE)
             win.addch(self.y+self.h-1,x,curses.ACS_BTEE)
-        for i in range(self.num_cols):
+        for i in range(self.col):
             name,string=self.headers[i]
             s=string[:self.col_w[i]]
             win.addstr(self.y+1,self.col_x[i],s)
 
-class TreeView(Widget):
+    def set_focus(self):
+        wg=super(ListView,self).set_focus()
+        if not wg:
+            return None
+        screen.move(self.y+2,self.x+1)
+
+class TreeView(ListView):
     def __init__(self):
         super(TreeView,self).__init__()
-        self.relation=None
-        self.headers=[]
+        self.field_parent=None
+
+    def set_vals(self,vals):
+        self.objs=vals
+
+    def draw(self,win):
+        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        for i in range(1,self.col):
+            x=self.col_x[i]-1
+            win.vline(self.y+1,x,curses.ACS_VLINE,self.h-2)
+            win.addch(self.y,x,curses.ACS_TTEE)
+            win.addch(self.y+self.h-1,x,curses.ACS_BTEE)
+        for i in range(self.col):
+            name,string=self.headers[i]
+            s=string[:self.col_w[i]]
+            win.addstr(self.y+1,self.col_x[i],s)
+        y=self.y+2
+        for obj in self.objs:
+            if obj[self.field_parent]:
+                win.addstr(y,self.x+1,"/")
+            for i in range(self.col):
+                name=self.names[i]
+                s=obj[name][:self.col_w[i]]
+                win.addstr(y,self.col_x[i],s)
+            y+=1
 
 class Label(Widget):
     def __init__(self):
         super(Label,self).__init__()
 
-    def set_maxw(self):
+    def _compute_pass1(self):
         self.maxw=len(self.string)
 
     def draw(self,win):
@@ -507,20 +672,27 @@ class Separator(Widget):
 class Button(Widget):
     def __init__(self):
         super(Button,self).__init__()
+        self.can_focus=True
 
-    def set_maxw(self):
+    def _compute_pass1(self):
         self.maxw=len(self.string)+2
 
     def draw(self,win):
         s="["+self.string[:self.w-2]+"]"
         win.addstr(self.y,self.x,s)
 
+    def set_focus(self):
+        wg=super(Button,self).set_focus()
+        if not wg:
+            return None
+        screen.move(self.y,self.x+1)
+
 class FieldLabel(Widget):
     def __init__(self):
         super(FieldLabel,self).__init__()
         self.align="right"
 
-    def set_maxw(self):
+    def _compute_pass1(self):
         self.maxw=len(self.string)+1
 
     def draw(self,win):
@@ -696,117 +868,212 @@ class InputM2M(Panel):
     def draw(self,win):
         pass
 
-def create_widget(el,panel=None,fields=None):
-    if el.tag=="form":
-        wg=Form()
-        wg.borders=[1,1,1,1]
-        for child in el:
-            create_widget(child,panel=wg,fields=fields)
+class TreeWindow(HorizontalPanel):
+    def __init__(self):
+        super(TreeWindow,self).__init__()
+        self.field_parent=None
+        self.root_list=ListView()
+        self.add(self.root_list)
+
+    def parse_tree(self,el,fields):
+        if el.tag=="tree":
+            wg=TreeView()
+            names=[]
+            for child in el:
+                names.append(child.attrib["name"])
+            wg.field_names=names
+            return wg
+
+    def load_view(self):
+        self.view=rpc_exec(self.model,"fields_view_get",self.view_id,"tree",self.context)
+        self.field_parent=self.view["field_parent"]
+        self.fields=self.view["fields"]
+        self.arch=xml.etree.ElementTree.fromstring(self.view["arch"])
+        self.tree=self.parse_tree(self.arch,self.fields)
+        self.add(self.tree)
+
+    def load_data(self):
+        self.root_ids=rpc_exec(self.model,"search",self.domain)
+        self.root_objs=rpc_exec(self.model,"read",self.root_ids,["name",self.field_parent])
+        self.root_list.set_vals(self.root_objs)
+        self.obj_ids=self.root_objs[0][self.field_parent]
+        self.objs=rpc_exec(self.model,"read",self.obj_ids,self.tree.field_names)
+        self.tree.set_vals(self.objs)
+
+    def draw(self,win):
+        self.root_list.draw(win)
+        self.tree.draw(win)
+
+class FormWindow(DeckPanel):
+    def __init__(self):
+        super(FormWindow,self).__init__()
+        self.tree=ListView()
+        self.form=Form()
+        self.add(self.tree)
+        self.add(self.form)
+
+    def parse_tree(self,el,fields):
+        if el.tag=="tree":
+            wg=Listview()
+            for child in el:
+                headers=[]
+                if child.tag=="field":
+                    name=child.attrib["name"]
+                    field=fields[name]
+                    headers.append((name,field["string"]))
+                wg.headers=headers
         return wg
-    elif el.tag=="tree":
-        wg=ListView()
-        for child in el:
-            name=child.attrib["name"]
-            field=fields[name]
-            wg.headers.append((name,field["string"]))
-        return wg
-    elif el.tag=="label":
-        wg=Label()
-        wg.set_attrib(el.attrib)
-        panel.add(wg)
-        return wg
-    elif el.tag=="newline":
-        panel.newline()
-        return None
-    elif el.tag=="separator":
-        wg=Separator()
-        wg.set_attrib(el.attrib)
-        panel.add(wg)
-        return wg
-    elif el.tag=="button":
-        wg=Button()
-        wg.set_attrib(el.attrib)
-        panel.add(wg)
-        return wg
-    elif el.tag=="field":
-        field=fields[el.attrib["name"]]
-        attrib={"string": field["string"]}
-        attrib.update(el.attrib)
-        if not el.attrib.get("nolabel"):
-            wg_l=FieldLabel()
-            wg_l.set_attrib(attrib)
-            panel.add(wg_l)
-        if field["type"]=="char":
-            wg=InputChar()
-        elif field["type"]=="integer":
-            wg=InputInteger()
-        elif field["type"]=="float":
-            wg=InputFloat()
-        elif field["type"]=="boolean":
-            wg=InputBoolean()
-        elif field["type"]=="date":
-            wg=InputDate()
-        elif field["type"]=="datetime":
-            wg=InputDatetime()
-        elif field["type"]=="text":
-            wg=InputText()
-        elif field["type"]=="selection":
-            wg=InputSelect()
-            wg.set_selection(field["selection"])
-        elif field["type"]=="many2one":
-            wg=InputM2O()
-        elif field["type"]=="one2many":
-            wg=InputO2M()
-            tree_view=field["views"].get("tree")
-            if not tree_view:
-                tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
-            tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
-            wg_t=create_widget(tree_arch,fields=tree_view["fields"])
-            wg_t.relation=field["relation"]
-            wg.add(wg_t,"tree")
-            form_view=field["views"].get("form")
-            if not form_view:
-                form_view=rpc_exec(field["relation"],"fields_view_get",False,"form",{})
-            form_arch=xml.etree.ElementTree.fromstring(form_view["arch"])
-            wg_f=create_widget(form_arch,fields=form_view["fields"])
-            wg_f.relation=field["relation"]
-            wg.add(wg_f,"form")
-        elif field["type"]=="many2many":
-            wg=InputM2M()
-            tree_view=field["views"].get("tree")
-            if not tree_view:
-                tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
-            tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
-            wg_t=create_widget(tree_arch,fields=tree_view["fields"])
-            wg_t.relation=field["relation"]
-            wg.add(wg_t)
+
+    def parse_form(self,el,panel=None,fields=None):
+        if el.tag=="form":
+            wg=Form()
+            wg.borders=[1,1,1,1]
+            for child in el:
+                self.parse_form(child,panel=wg,fields=fields)
+            return wg
+        elif el.tag=="tree":
+            wg=ListView()
+            for child in el:
+                name=child.attrib["name"]
+                field=fields[name]
+                wg.headers.append((name,field["string"]))
+            return wg
+        elif el.tag=="label":
+            wg=Label()
+            wg.set_view_attrs(el.attrib)
+            panel.add(wg)
+            return wg
+        elif el.tag=="newline":
+            panel.newline()
+            return None
+        elif el.tag=="separator":
+            wg=Separator()
+            wg.set_view_attrs(el.attrib)
+            panel.add(wg)
+            return wg
+        elif el.tag=="button":
+            wg=Button()
+            wg.set_view_attrs(el.attrib)
+            panel.add(wg)
+            return wg
+        elif el.tag=="field":
+            field=fields[el.attrib["name"]]
+            if not el.attrib.get("nolabel"):
+                wg_l=FieldLabel()
+                wg_l.set_field_attrs(field)
+                wg_l.set_view_attrs(el.attrib)
+                panel.add(wg_l)
+            if field["type"]=="char":
+                wg=InputChar()
+            elif field["type"]=="integer":
+                wg=InputInteger()
+            elif field["type"]=="float":
+                wg=InputFloat()
+            elif field["type"]=="boolean":
+                wg=InputBoolean()
+            elif field["type"]=="date":
+                wg=InputDate()
+            elif field["type"]=="datetime":
+                wg=InputDatetime()
+            elif field["type"]=="text":
+                wg=InputText()
+            elif field["type"]=="selection":
+                wg=InputSelect()
+                wg.set_selection(field["selection"])
+            elif field["type"]=="many2one":
+                wg=InputM2O()
+            elif field["type"]=="one2many":
+                wg=InputO2M()
+                tree_view=field["views"].get("tree")
+                if not tree_view:
+                    tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
+                tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
+                wg_t=self.parse_form(tree_arch,fields=tree_view["fields"])
+                wg_t.relation=field["relation"]
+                wg.add(wg_t,"tree")
+                form_view=field["views"].get("form")
+                if not form_view:
+                    form_view=rpc_exec(field["relation"],"fields_view_get",False,"form",{})
+                form_arch=xml.etree.ElementTree.fromstring(form_view["arch"])
+                wg_f=self.parse_form(form_arch,fields=form_view["fields"])
+                wg_f.relation=field["relation"]
+                wg.add(wg_f,"form")
+            elif field["type"]=="many2many":
+                wg=InputM2M()
+                tree_view=field["views"].get("tree")
+                if not tree_view:
+                    tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
+                tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
+                wg_t=self.parse_form(tree_arch,fields=tree_view["fields"])
+                wg_t.relation=field["relation"]
+                wg.add(wg_t)
+            else:
+                raise Exception("unsupported field type: %s"%field["type"])
+            wg.name=el.attrib["name"]
+            wg.set_field_attrs(field)
+            wg.set_view_attrs(el.attrib)
+            panel.add(wg)
+            return wg
+        elif el.tag=="group":
+            wg=Group()
+            wg.set_view_attrs(el.attrib)
+            for child in el:
+                self.parse_form(child,wg,fields=fields)
+            panel.add(wg)
+            return wg
+        elif el.tag=="notebook":
+            wg=Notebook()
+            wg.set_view_attrs(el.attrib)
+            wg.borders=[1,1,1,1]
+            for elp in el:
+                wg_p=Page()
+                wg_p.set_view_attrs(elp.attrib)
+                wg.add(wg_p)
+                for child in elp:
+                    self.parse_form(child,wg_p,fields=fields)
+            panel.add(wg)
+            return wg
         else:
-            raise Exception("unsupported field type: %s"%field["type"])
-        wg.name=el.attrib["name"]
-        wg.set_attrib(attrib)
-        panel.add(wg)
-        return wg
-    elif el.tag=="group":
-        wg=Group()
-        wg.set_attrib(el.attrib)
-        for child in el:
-            create_widget(child,wg,fields=fields)
-        panel.add(wg)
-        return wg
-    elif el.tag=="notebook":
-        wg=Notebook()
-        wg.set_attrib(el.attrib)
-        wg.borders=[1,1,1,1]
-        for elp in el:
-            wg_p=Page()
-            wg_p.set_attrib(elp.attrib)
-            wg.add(wg_p)
-            for child in elp:
-                create_widget(child,wg_p,fields=fields)
-        panel.add(wg)
-        return wg
-    else:
-        raise Exception("invalid tag: "+el.tag)
+            raise Exception("invalid tag: "+el.tag)
+
+    def load_view(self):
+        if self.mode=="tree":
+            self.tree_view=rpc_exec(self.relation,"fields_view_get",None,"tree",self.context)
+            self.tree_arch=xml.etree.ElementTree.fromstring(self.view["arch"])
+            self.tree=self.parse_tree(self.tree_arch,self.tree_view["fields"])
+        elif self.mode=="form":
+            self.form_view=rpc_exec(self.relation,"fields_view_get",None,"form",self.context)
+            self.form_fields=self.view["fields"]
+            self.form_arch=xml.etree.ElementTree.fromstring(self.view["arch"])
+            self.form=self.parse_form(self.form_arch,self.form_view["fields"])
+
+    def load_data(self):
+        if self.mode=="tree":
+            self.obj_ids=rpc_exec(self.relation,"search",self.domain)
+            self.objs=rpc_exec(self.relation,"read",self.obj_ids,self.tree_fields.keys())
+            self.tree.set_vals(self.objs)
+        elif self.mode=="form":
+            self.obj=rpc_exec(self.relation,"read",[self.obj_id],self.form_fields.keys())[0]
+            self.form.set_vals(self.obj)
+
+class TabPanel(DeckPanel):
+    def __init__(self):
+        super(TabPanel,self).__init__()
+        self.can_focus=True
+
+    def draw(self,win):
+        x=self.x
+        i=0
+        for wg in self._childs:
+            s="%d %s "%(i+1,wg.name)
+            if wg==self.cur_wg:
+                win.addstr(self.y,x,s,curses.A_REVERSE)
+            else:
+                win.addstr(self.y,x,s)
+            i+=1
+            x+=len(s)
+        for wg in self._childs:
+            wg.draw(win)
 
 def view_to_s(el,d=0):
     s="  "*d+el.tag
@@ -818,259 +1085,32 @@ def view_to_s(el,d=0):
     return s
 
 def act_window_tree(act):
-    #log("act_window_tree",act)
-    model=act["res_model"]
-    domain=act["domain"] and eval(act["domain"]) or []
-    context=act["context"] and eval(act["context"]) or {}
-    view=rpc_exec(model,"fields_view_get",act["view_id"][0],"tree",context)
-    #log("view",view)
-    ids=rpc_exec(model,"search",domain)
-    objs_l=rpc_exec(model,"read",ids,["id","name"])
-    screen.addstr(0,0,"1 "+act["name"])
-    screen.chgat(0,0,7,curses.A_REVERSE)
-    win=screen.subwin(23,80,1,0)
-    win.clear()
-    win.box()
-    win.vline(1,25,curses.ACS_VLINE,21)
-    win.addch(0,25,curses.ACS_TTEE)
-    win.addch(22,25,curses.ACS_BTEE)
-    win.hline(2,26,curses.ACS_HLINE,78)
-    win.addch(2,25,curses.ACS_LTEE)
-    win.addch(2,79,curses.ACS_RTEE)
-    win_l=win.subwin(21,24,2,1)
-    win_r=win.subwin(19,53,4,26)
-    pad_r=curses.newpad(100,53)
-    y=0
-    for obj in objs_l:
-        win_l.addstr(y,1,obj["name"])
-        y+=1
-    fields=view["fields"]
-    field_names=fields.keys()
-    field_parent=view["field_parent"]
-    win.addstr(1,27,fields[field_names[0]]["string"])
-    if objs_l:
-        child_ids=rpc_exec(model,"read",objs_l[0]["id"],[field_parent])[field_parent]
-        objs_r=rpc_exec(model,"read",child_ids,["id",field_parent]+field_names)
-        y=0
-        for obj in objs_r:
-            obj["_depth"]=0
-            obj["_expanded"]=False
-            pad_r.addstr(y,1,obj["name"])
-            if obj[field_parent]:
-                pad_r.addch(y,0,"/")
-            y+=1
-    select_l=0
-    win_l.chgat(select_l,0,24,curses.A_REVERSE)
+    win=TreeWindow()
+    win.model=act["res_model"]
+    win.domain=act["domain"] and eval(act["domain"]) or []
+    win.context=act["context"] and eval(act["context"]) or {}
+    win.view_id=act["view_id"][0]
+    win.name=act["name"]
+    win.load_view()
+    win.load_data()
+    tab_panel.add(win)
+    tab_panel.compute(80,0,0)
+    tab_panel.draw(screen)
+    tab_panel.set_focus()
     screen.refresh()
-    pad_r.refresh(0,0,4,26,22,78)
-    screen.move(2,2)
-    mode="l"
-    scroll_r=0
-    while 1:
-        c=screen.getch()
-        if c==curses.KEY_DOWN:
-            if mode=="l":
-                i=screen.getyx()[0]-2
-                i+=1
-                if i>=len(objs_l):
-                    i=0
-                screen.move(i+2,2)
-            elif mode=="r":
-                i=screen.getyx()[0]-4+scroll_r
-                i+=1
-                if i>=len(objs_r):
-                    i=0
-                obj=objs_r[i]
-                scroll=False
-                if i-scroll_r>18:
-                    scroll_r=i-18
-                    scroll=True
-                elif i<scroll_r:
-                    scroll_r=i
-                    scroll=True
-                if scroll:
-                    pad_r.refresh(scroll_r,0,4,26,22,79)
-                screen.move(4+i-scroll_r,27+obj["_depth"]*2)
-        elif c==curses.KEY_UP:
-            if mode=="l":
-                i=screen.getyx()[0]-2
-                i-=1
-                if i<0:
-                    i=len(objs_l)-1
-                screen.move(i+2,2)
-            elif mode=="r":
-                i=screen.getyx()[0]-4+scroll_r
-                i-=1
-                if i<0:
-                    i=len(objs_r)-1
-                obj=objs_r[i]
-                scroll=False
-                if i-scroll_r>18:
-                    scroll_r=i-18
-                    scroll=True
-                elif i<scroll_r:
-                    scroll_r=i
-                    scroll=True
-                if scroll:
-                    pad_r.refresh(scroll_r,0,4,26,22,79)
-                screen.move(i+4-scroll_r,27+obj["_depth"]*2)
-        elif c==curses.KEY_RIGHT:
-            if mode=="l":
-                mode="r"
-                screen.move(4,27)
-            elif mode=="r":
-                y,x=screen.getyx()
-                i=y-4
-                obj=objs_r[i]
-                if obj["_expanded"]:
-                    continue
-                child_ids=rpc_exec(model,"read",obj["id"],[field_parent])[field_parent]
-                if child_ids:
-                    childs=rpc_exec(model,"read",child_ids,["id",field_parent]+field_names)
-                    childs.reverse()
-                    for child in childs:
-                        child["_depth"]=obj["_depth"]+1
-                        child["_expanded"]=False
-                        objs_r.insert(i+1,child)
-                        pad_r.move(i+1,0)
-                        pad_r.insertln()
-                        pad_r.addstr(i+1,1+child["_depth"]*2,child["name"])
-                        if child[field_parent]:
-                            pad_r.addch(i+1,child["_depth"]*2,"/")
-                    obj["_expanded"]=True
-                pad_r.refresh(0,0,4,26,22,79)
-                screen.move(y,x)
-        elif c==curses.KEY_LEFT:
-            if mode=="r":
-                i=screen.getyx()[0]-4+scroll_r
-                obj=objs_r[i]
-                if obj["_depth"]==0 and not obj["_expanded"]:
-                    mode="l"
-                    screen.move(2+select_l,2)
-                    win_l.refresh()
-                    continue
-                while not obj["_expanded"]:
-                    i-=1
-                    obj=objs_r[i]
-                child_ids=obj[field_parent]
-                while i+1<len(objs_r):
-                    child=objs_r[i+1]
-                    if child["id"] not in child_ids:
-                        break
-                    child_ids+=child[field_parent]
-                    objs_r.pop(i+1)
-                    pad_r.move(i+1,0)
-                    pad_r.deleteln()
-                    folded=True
-                pad_r.refresh(0,0,4,26,22,79)
-                screen.move(i+4,27+obj["_depth"]*2)
-                obj["_expanded"]=False
-        elif c==ord("\t"):
-            if mode=="l":
-                mode="r"
-                screen.move(4,27)
-            elif mode=="r":
-                mode="l"
-                screen.move(2+select_l,2)
-        elif c==ord("\n"):
-            if mode=="l":
-                y,x=screen.getyx()
-                win_l.chgat(select_l,0,24,0)
-                select_l=y-2
-                win_l.chgat(select_l,0,24,curses.A_REVERSE)
-                win_l.refresh()
-
-                pad_r.clear()
-                child_ids=rpc_exec(model,"read",objs_l[select_l]["id"],[field_parent])[field_parent]
-                objs_r=rpc_exec(model,"read",child_ids,["id",field_parent]+field_names)
-                i=0
-                for obj in objs_r:
-                    obj["_depth"]=0
-                    obj["_expanded"]=False
-                    pad_r.addstr(i,1,obj["name"])
-                    if obj[field_parent]:
-                        pad_r.addch(i,0,"/")
-                    i+=1
-                pad_r.refresh(0,0,4,26,22,78)
-                screen.move(y,x)
-            elif mode=="r":
-                i=screen.getyx()[0]-4+scroll_r
-                obj=objs_r[i]
-                res=rpc_exec("ir.values","get","action","tree_but_open",[(model,obj["id"])])
-                if not res:
-                    continue
-                act=res[0][2]
-                action(act["id"])
 
 def act_window_form(act):
-    model=act["res_model"]
-    view_modes=act["view_mode"].split(",")
-    mode=view_modes[0]
-    domain=act["domain"] and eval(act["domain"]) or []
-    context=act["context"] and eval(act["context"]) or {}
-    view_id=False
-    view=rpc_exec(model,"fields_view_get",view_id,mode,context)
-    fields=view["fields"]
-    field_names=fields.keys()
-    arch=xml.etree.ElementTree.fromstring(view["arch"])
-    screen.clear()
-    screen.addstr("1 Menu ")
-    screen.addstr("2 "+act["name"]+" ",curses.A_REVERSE)
-    pad=curses.newpad(100,80)
-    if mode=="tree":
-        ids=rpc_exec(model,"search",domain)
-        objs=rpc_exec(model,"read",ids,["id"]+field_names)
-    elif mode=="form":
-        obj={}
-        defaults=rpc_exec(model,"default_get",field_names)
-        for name,val in defaults.items():
-            if fields[name]["type"]=="many2one" and type(val)==type(1):
-                val=rpc_exec(fields[name]["relation"],"name_get",[val])[0]
-            obj[name]=val
-        form=create_widget(arch,fields=fields)
-        form.set_vals(obj)
-        form.compute(80,1,0)
-        form.draw(screen)
-        wg=form.get_focused()
-        screen.move(wg.y,wg.x)
-        screen.refresh()
-    else:
-        raise Exception("view mode not implemented: "+mode)
-    while 1:
-        c=screen.getch()
-        if c==curses.KEY_DOWN:
-            y,x=screen.getyx()
-            i=y-4
-            i+=1
-            if i>len(objs)-1:
-                i=0
-            screen.move(4+i,1)
-        elif c==curses.KEY_UP:
-            y,x=screen.getyx()
-            i=y-4
-            i-=1
-            if i<0:
-                i=len(objs)-1
-            screen.move(4+i,1)
-        elif c==ord(" "):
-            y,x=screen.getyx()
-            i=y-4
-            obj=objs[i]
-            if not obj.get("_selected"):
-                x=1
-                for name in headers:
-                    screen.chgat(y,x,colw[name],curses.A_REVERSE)
-                    x+=colw[name]+1
-                obj["_selected"]=True
-            else:
-                x=1
-                for name in headers:
-                    screen.chgat(y,x,colw[name],0)
-                    x+=colw[name]+1
-                obj["_selected"]=False
-            screen.refresh()
-        elif c==ord("\n"):
-            pass
+    win=FormWindow()
+    win.model=act["res_model"]
+    win.domain=act["domain"] and eval(act["domain"]) or []
+    win.context=act["context"] and eval(act["context"]) or {}
+    win.load_view()
+    win.load_data()
+    tab_panel.add(win)
+    tab_panel.compute(80,0,0)
+    tab_panel.draw(screen)
+    tab_panel.set_focus()
+    screen.refresh()
 
 def act_window(act_id):
     #log("act_window",act_id)
@@ -1091,10 +1131,14 @@ def action(act_id):
         raise Exception("Unsupported action type: %s"%act["type"])
 
 def start(stdscr):
-    global screen
+    global screen,tab_panel
     screen=stdscr
     screen.keypad(1)
-    #curses.init_pair(1,curses.COLOR_RED,curses.COLOR_BLACK)
+    tab_panel=TabPanel()
     user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
     action(user["action_id"][0])
+    while 1:
+        k=screen.getch()
+        tab_panel.key_pressed(k)
+
 curses.wrapper(start)
