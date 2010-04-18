@@ -96,8 +96,8 @@ class Widget(object):
         self.x=None
         self.y=None
         self.w=None
-        self.h=1
-        self.maxw=-1
+        self.h=None
+        self.maxw=None
         self.borders=[0,0,0,0]
         self.align="left"
         self.cx=None
@@ -314,209 +314,25 @@ class DeckPanel(Panel):
             ind+=self.cur_wg.get_tabindex()
         return ind
 
-class HorizontalPanel(Panel):
+class TabPanel(DeckPanel):
     def __init__(self):
-        super(HorizontalPanel,self).__init__()
+        super(TabPanel,self).__init__()
+        self.can_focus=True
+        self.borders=[1,0,0,0]
 
     def draw(self,win):
-        pass
-
-class Table(Panel):
-    def __init__(self):
-        super(Table,self).__init__()
-        self.col=4
-        self.num_rows=0
-        self._childs=[]
-        self._child_cx=0
-        self._child_cy=0
-        self.seps=[0,1]
-        self.h_top=None
-        self.w_left=None
-
-    def add(self,wg):
-        if wg.colspan>self.col:
-            raise Exception("invalid colspan")
-        if self._child_cx+wg.colspan>self.col:
-            self._child_cy+=1
-            self._child_cx=0
-        wg.cy=self._child_cy
-        wg.cx=self._child_cx
-        self._child_cx+=wg.colspan
-        self._childs.append(wg)
-        self.num_rows=wg.cy+1
-
-    def newline(self):
-        self._child_cy+=1
-        self._child_cx=0
-
-    def _compute_pass1(self):
-        if not self._childs:
-            return
-        for widget in self._vis_childs():
-            if hasattr(widget,"_compute_pass1"):
-                widget._compute_pass1()
-        # 1. compute container max width
-        expand=False
-        for wg in self._vis_childs():
-            if wg.maxw==-1:
-                expand=True
-                break
-        if expand:
-            self.maxw=-1
-        else:
-            w_left=[0]
-            for i in range(1,self.col+1):
-                w_max=w_left[i-1]
-                for wg in self._vis_childs():
-                    cr=wg.cx+wg.colspan
-                    if cr!=i:
-                        continue
-                    w=w_left[wg.cx]+wg.maxw
-                    if wg.cx>0:
-                        w+=self.seps[1]
-                    if w>w_max:
-                        w_max=w
-                w_left.append(w_max)
-            self.maxw=self.borders[3]+self.borders[1]+w_left[-1]
-        # 2. compute container height
-        self.h_top=[0]
-        for i in range(self.num_rows):
-            h=0
-            for wg in self._vis_childs():
-                if wg.cy!=i:
-                    continue
-                if wg.h>h:
-                    h=wg.h
-            h+=self.h_top[-1]
-            if i>0:
-                h+=self.seps[0]
-            self.h_top.append(h)
-        self.h=self.borders[0]+self.h_top[-1]+self.borders[2]
-
-    def _compute_pass2(self):
-        if not self._childs:
-            self.w=0
-            return
-        # 1. compute child widths
-        w_avail=self.w-self.borders[3]-self.borders[1]
-        for wg in self._vis_childs():
-            wg.w=0
-        w_left=[0]*(self.col+1)
-        w_rest=w_avail
-        # allocate space fairly to every child
-        while w_rest>0:
-            w_alloc=w_rest-self.seps[1]*(self.col-1)
-            if w_alloc>self.col:
-                dw=w_alloc/self.col
+        x=self.x
+        i=0
+        for wg in self._childs:
+            s="%d %s "%(i+1,wg.name)
+            if wg==self.cur_wg:
+                win.addstr(self.y,x,s,curses.A_REVERSE)
             else:
-                dw=1
-            incr=False
-            for wg in self._vis_childs():
-                if wg.maxw!=-1:
-                    if not wg.w<wg.maxw:
-                        continue
-                    dw_=min(dw,wg.maxw-wg.w)
-                else:
-                    dw_=dw
-                wg.w+=dw_
-                incr=True
-                w=w_left[wg.cx]+wg.w
-                if wg.cx>0:
-                    w+=self.seps[1]
-                cr=wg.cx+wg.colspan
-                if w>w_left[cr]:
-                    dwl=w-w_left[cr]
-                    for i in range(cr,self.col+1):
-                        w_left[i]+=dwl
-                    w_rest=w_avail-w_left[-1]
-                    if w_rest==0:
-                        break
-            if not incr:
-                break
-        self.w_left=w_left
-        # add extra cell space to regions
-        for wg in self._vis_childs():
-            if wg.maxw!=-1 and wg.w==wg.maxw:
-                continue
-            w=w_left[wg.cx]+wg.w
-            if wg.cx>0:
-                w+=self.seps[1]
-            cr=wg.cx+wg.colspan
-            if w<w_left[cr]:
-                dw=w_left[cr]-w
-                if wg.maxw!=-1:
-                    dw=min(dw,wg.maxw-wg.w)
-                wg.w+=dw
-        # 2. compute child positions
-        for wg in self._vis_childs():
-            wg.y=self.y+self.borders[0]+self.h_top[wg.cy]+(wg.cy>0 and self.seps[0] or 0)
-            if wg.align=="right":
-                wg.x=self.x+self.borders[3]+w_left[wg.cx+wg.colspan]-wg.w
-            else:
-                wg.x=self.x+self.borders[3]+w_left[wg.cx]+(wg.cx>0 and self.seps[1] or 0)
-        for child in self._vis_childs():
-            if hasattr(child,"_compute_pass2"):
-                child._compute_pass2()
-
-class Form(Table):
-    def __init__(self):
-        super(Form,self).__init__()
-        self.relation=None
-        self.string=""
-
-    def update_attrs(self,vals):
-        state=vals.get("state")
-        update=("readonly","required","invisible")
-        for k,v in self.field_attrs.items():
-            if k in update:
-                setattr(self,k,v)
-        states=self.field_attrs.get("states")
-        if states and state in states:
-            for k,v in states[state]:
-                if k in update:
-                    setattr(self,k,v)
-                else:
-                    raise Exception("attribute can not be updated: %s"%k)
-        for k,v in self.view_attrs.items():
-            if k in update:
-                setattr(self,k,v)
-        states=self.view_attrs.get("states")
-        if states!=None:
-            self.invisible=not state in states
-        attrs=self.view_attrs.get("attrs")
-        if attrs:
-            for k,dom in attrs.items():
-                if k in update:
-                    setattr(self,k,eval_dom(dom,vals))
-                else:
-                    raise Exception("attribute can not be updated: %s"%k)
-
-    def draw(self,win):
-        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
-        super(Form,self).draw(win)
-
-    def key_pressed(self,k):
-        wg_f=self.get_focused()
-        if k in (ord("\t"),curses.KEY_DOWN):
-            ind=self.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i+1)%len(ind)
-            ind[i].set_focus()
-            wg_f.has_focus=False
-        elif k==curses.KEY_UP:
-            ind=self.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i-1)%len(ind)
-            ind[i].set_focus()
-            wg_f.has_focus=False
-        else:
-            set_trace()
-            wg_f.key_pressed(k)
-
-class Group(Table):
-    def __init__(self):
-        super(Group,self).__init__()
-        self.string=""
+                win.addstr(self.y,x,s)
+            i+=1
+            x+=len(s)
+        for wg in self._childs:
+            wg.draw(win)
 
 class Notebook(DeckPanel):
     def __init__(self):
@@ -549,72 +365,307 @@ class Notebook(DeckPanel):
             return None
         screen.move(self.y,self.x+3)
 
-class Page(Table):
+class Table(Panel):
     def __init__(self):
-        super(Page,self).__init__()
+        super(Table,self).__init__()
+        self.col=0
+        self.num_rows=0
+        self._childs=[]
+        self._child_cx=0
+        self._child_cy=0
+        self.seps=[[(0,False)],[(0,False)]]
+        self.h_top=None
+        self.w_left=None
 
-class ListView(Widget):
-    def __init__(self):
-        super(ListView,self).__init__()
-        self.relation=None
-        self.headers=[]
-        self.sep=1
-        self.h=8
-        self.borders=[1,1,1,1]
-        self.can_focus=True
+    def add(self,wg):
+        if wg.colspan>self.col:
+            raise Exception("invalid colspan")
+        if self._child_cx+wg.colspan>self.col:
+            self._child_cy+=1
+            self._child_cx=0
+        wg.cy=self._child_cy
+        wg.cx=self._child_cx
+        self._child_cx+=wg.colspan
+        self._childs.append(wg)
+        self.num_rows=wg.cy+1
 
-    def update_attrs(self,vals):
-        pass
+    def newline(self):
+        self._child_cy+=1
+        self._child_cx=0
+
+    def _get_sep_size(self,type,i):
+        if type=="y":
+            seps=self.seps[0]
+        elif type=="x":
+            seps=self.seps[1]
+        else:
+            raise Exception("invalid separator type")
+        if i==0:
+            return 0
+        elif i-1<len(seps):
+            return seps[i-1][0]
+        else:
+            return seps[-1][0]
+
+    def _get_sep_style(self,type,i):
+        if type=="y":
+            seps=self.seps[0]
+        elif type=="x":
+            seps=self.seps[1]
+        else:
+            raise Exception("invalid separator type")
+        if i==0:
+            return False
+        elif i-1<len(seps):
+            return seps[i-1][1]
+        else:
+            return seps[-1][1]
+
+    def _total_sep_size(self,type):
+        if type=="y":
+            n=self.num_rows
+        elif type=="x":
+            n=self.col
+        else:
+            raise Exception("invalid separator type")
+        return sum([self._get_sep_size(type,i) for i in range(n)])
 
     def _compute_pass1(self):
-        self.col=len(self.headers)
-        self.col_maxw=[]
-        for name,string in self.headers:
-            self.col_maxw.append(len(string))
-        self.maxw=-1
+        if not self._childs:
+            return
+        for widget in self._vis_childs():
+            if hasattr(widget,"_compute_pass1"):
+                widget._compute_pass1()
+        # 1. compute container max width
+        if self.maxw==None:
+            expand=False
+            for wg in self._vis_childs():
+                if wg.maxw==-1:
+                    expand=True
+                    break
+            if expand:
+                self.maxw=-1
+            else:
+                w_left=[0]
+                for i in range(1,self.col+1):
+                    w_max=w_left[i-1]
+                    for wg in self._vis_childs():
+                        cr=wg.cx+wg.colspan
+                        if cr!=i:
+                            continue
+                        w=w_left[wg.cx]+self._get_sep_size("x",wg.cx)+wg.maxw
+                        if w>w_max:
+                            w_max=w
+                    w_left.append(w_max)
+                self.maxw=self.borders[3]+self.borders[1]+w_left[-1]
+        # 2. compute container height
+        self.h_top=[0]
+        for i in range(self.num_rows):
+            h=0
+            for wg in self._vis_childs():
+                if wg.cy!=i:
+                    continue
+                if wg.h>h:
+                    h=wg.h
+            h+=self.h_top[-1]+self._get_sep_size("y",i)
+            self.h_top.append(h)
+        if self.h==None:
+            self.h=self.borders[0]+self.h_top[-1]+self.borders[2]
 
     def _compute_pass2(self):
-        self.col_w=[0]*self.col
+        if not self._childs:
+            self.w=0
+            return
+        # 1. compute child widths
         w_avail=self.w-self.borders[3]-self.borders[1]
+        for wg in self._vis_childs():
+            wg.w=0
+        w_left=[0]*(self.col+1)
         w_rest=w_avail
+        # allocate space fairly to every child
         while w_rest>0:
-            w_alloc=w_rest-self.sep*(self.col-1)
+            w_alloc=w_rest-self._total_sep_size("x")
             if w_alloc>self.col:
                 dw=w_alloc/self.col
             else:
                 dw=1
             incr=False
-            for i in range(self.col):
-                maxw=self.col_maxw[i]
-                if maxw!=-1:
-                    colw=self.col_w[i]
-                    if not colw<maxw:
+            for wg in self._vis_childs():
+                if wg.maxw!=-1:
+                    if not wg.w<wg.maxw:
                         continue
-                    dw_=min(dw,maxw-colw)
+                    dw_=min(dw,wg.maxw-wg.w)
                 else:
                     dw_=dw
-                self.col_w[i]+=dw_
-                w_rest-=dw_
+                wg.w+=dw_
                 incr=True
-                if not w_rest:
-                    break
+                w=w_left[wg.cx]+self._get_sep_size("x",wg.cx)+wg.w
+                cr=wg.cx+wg.colspan
+                if w>w_left[cr]:
+                    dwl=w-w_left[cr]
+                    for i in range(cr,self.col+1):
+                        w_left[i]+=dwl
+                    w_rest=w_avail-w_left[-1]
+                    if w_rest==0:
+                        break
             if not incr:
                 break
-        self.col_x=[self.x+self.borders[3]]
-        for i in range(1,self.col):
-            self.col_x.append(self.col_x[i-1]+self.col_w[i-1]+self.sep)
+        self.w_left=w_left
+        # add extra cell space to regions
+        for wg in self._vis_childs():
+            if wg.maxw!=-1 and wg.w==wg.maxw:
+                continue
+            w=w_left[wg.cx]+self._get_sep_size("x",wg.cx)+wg.w
+            cr=wg.cx+wg.colspan
+            if w<w_left[cr]:
+                dw=w_left[cr]-w
+                if wg.maxw!=-1:
+                    dw=min(dw,wg.maxw-wg.w)
+                wg.w+=dw
+        # 2. compute child positions
+        for wg in self._vis_childs():
+            wg.y=self.y+self.borders[0]+self.h_top[wg.cy]+self._get_sep_size("y",wg.cy)
+            if wg.align=="right":
+                wg.x=self.x+self.borders[3]+w_left[wg.cx+wg.colspan]-wg.w
+            else:
+                wg.x=self.x+self.borders[3]+w_left[wg.cx]+self._get_sep_size("x",wg.cx)
+        for child in self._vis_childs():
+            if hasattr(child,"_compute_pass2"):
+                child._compute_pass2()
 
     def draw(self,win):
-        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        # draw borders
+        if self.borders[0]:
+            curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        # draw vertical separators
+        x0=self.x+self.borders[3]
+        y0=self.y+self.borders[0]-1
+        y1=self.y+self.h-self.borders[2]
         for i in range(1,self.col):
-            x=self.col_x[i]-1
-            win.vline(self.y+1,x,curses.ACS_VLINE,self.h-2)
-            win.addch(self.y,x,curses.ACS_TTEE)
-            win.addch(self.y+self.h-1,x,curses.ACS_BTEE)
-        for i in range(self.col):
-            name,string=self.headers[i]
-            s=string[:self.col_w[i]]
-            win.addstr(self.y+1,self.col_x[i],s)
+            if self._get_sep_style("x",i):
+                x=x0+self.w_left[i]
+                win.vline(y0+1,x,curses.ACS_VLINE,y1-y0-1)
+                win.addch(y0,x,curses.ACS_TTEE)
+                win.addch(y1,x,curses.ACS_BTEE)
+        # draw horizontal separators
+        y0=self.y+self.borders[0]
+        x0=self.x+self.borders[3]-1
+        x1=self.x+self.w-self.borders[1]
+        for i in range(1,self.num_rows):
+            if self._get_sep_style("y",i):
+                y=y0+self.h_top[i]
+                win.hline(y,x0+1,curses.ACS_HLINE,x1-x0-1)
+                win.addch(y,x0,curses.ACS_LTEE)
+                win.addch(y,x1,curses.ACS_RTEE)
+        # draw cell contents
+        super(Table,self).draw(win)
+
+class Form(Table):
+    def __init__(self):
+        super(Form,self).__init__()
+        self.relation=None
+        self.string=""
+        self.seps=[[(0,False)],[(1,False)]]
+
+    def update_attrs(self,vals):
+        state=vals.get("state")
+        update=("readonly","required","invisible")
+        for k,v in self.field_attrs.items():
+            if k in update:
+                setattr(self,k,v)
+        states=self.field_attrs.get("states")
+        if states and state in states:
+            for k,v in states[state]:
+                if k in update:
+                    setattr(self,k,v)
+                else:
+                    raise Exception("attribute can not be updated: %s"%k)
+        for k,v in self.view_attrs.items():
+            if k in update:
+                setattr(self,k,v)
+        states=self.view_attrs.get("states")
+        if states!=None:
+            self.invisible=not state in states
+        attrs=self.view_attrs.get("attrs")
+        if attrs:
+            for k,dom in attrs.items():
+                if k in update:
+                    setattr(self,k,eval_dom(dom,vals))
+                else:
+                    raise Exception("attribute can not be updated: %s"%k)
+
+    def key_pressed(self,k):
+        wg_f=self.get_focused()
+        if k in (ord("\t"),curses.KEY_DOWN):
+            ind=self.get_tabindex()
+            i=ind.index(wg_f)
+            i=(i+1)%len(ind)
+            ind[i].set_focus()
+            wg_f.has_focus=False
+        elif k==curses.KEY_UP:
+            ind=self.get_tabindex()
+            i=ind.index(wg_f)
+            i=(i-1)%len(ind)
+            ind[i].set_focus()
+            wg_f.has_focus=False
+        else:
+            set_trace()
+            wg_f.key_pressed(k)
+
+class Group(Table):
+    def __init__(self):
+        super(Group,self).__init__()
+        self.string=""
+
+class Page(Table):
+    def __init__(self):
+        super(Page,self).__init__()
+
+class HorizontalPanel(Table):
+    def __init__(self):
+        super(HorizontalPanel,self).__init__()
+        self.borders=[1,1,1,1]
+        self.seps=[[(0,False)],[(1,True)]]
+
+    def add(self,wg):
+        wg.colspan=1
+        self.col+=1
+        super(HorizontalPanel,self).add(wg)
+
+class ListView(Table):
+    def __init__(self):
+        super(ListView,self).__init__()
+        self.relation=None
+        self.h=8
+        self.borders=[1,1,1,1]
+        self.can_focus=True
+
+    def set_cols(self,names,headers=[]):
+        self.names=names
+        self.headers=headers
+        self.col=len(names)
+        for s in headers:
+            wg=Label()
+            wg.string=s
+            wg.colspan=1
+            self.add(wg)
+
+    def add_line(self,line):
+        for name in self.names:
+            if not name in line:
+                raise Exception("Missing field in line: %s"%name)
+            val=str(line[name])
+            wg=Label()
+            wg.string=val
+            wg.colspan=1
+            self.add(wg)
+
+    def add_lines(self,lines):
+        for line in lines:
+            self.add_line(line)
+
+    def delete_lines():
+        del self._childs[self.col:]
 
     def set_focus(self):
         wg=super(ListView,self).set_focus()
@@ -623,37 +674,12 @@ class ListView(Widget):
         screen.move(self.y+2,self.x+1)
 
 class TreeView(ListView):
-    def __init__(self):
-        super(TreeView,self).__init__()
-        self.field_parent=None
-
-    def set_vals(self,vals):
-        self.objs=vals
-
-    def draw(self,win):
-        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
-        for i in range(1,self.col):
-            x=self.col_x[i]-1
-            win.vline(self.y+1,x,curses.ACS_VLINE,self.h-2)
-            win.addch(self.y,x,curses.ACS_TTEE)
-            win.addch(self.y+self.h-1,x,curses.ACS_BTEE)
-        for i in range(self.col):
-            name,string=self.headers[i]
-            s=string[:self.col_w[i]]
-            win.addstr(self.y+1,self.col_x[i],s)
-        y=self.y+2
-        for obj in self.objs:
-            if obj[self.field_parent]:
-                win.addstr(y,self.x+1,"/")
-            for i in range(self.col):
-                name=self.names[i]
-                s=obj[name][:self.col_w[i]]
-                win.addstr(y,self.col_x[i],s)
-            y+=1
+    pass
 
 class Label(Widget):
     def __init__(self):
         super(Label,self).__init__()
+        self.h=1
 
     def _compute_pass1(self):
         self.maxw=len(self.string)
@@ -665,6 +691,7 @@ class Separator(Widget):
     def __init__(self):
         super(Separator,self).__init__()
         self.string=""
+        self.h=1
 
     def draw(self,win):
         pass
@@ -673,6 +700,7 @@ class Button(Widget):
     def __init__(self):
         super(Button,self).__init__()
         self.can_focus=True
+        self.h=1
 
     def _compute_pass1(self):
         self.maxw=len(self.string)+2
@@ -691,6 +719,7 @@ class FieldLabel(Widget):
     def __init__(self):
         super(FieldLabel,self).__init__()
         self.align="right"
+        self.h=1
 
     def _compute_pass1(self):
         self.maxw=len(self.string)+1
@@ -717,6 +746,7 @@ class InputChar(Input):
         super(InputChar,self).__init__()
         self.size=None
         self.value=""
+        self.h=1
 
     def draw(self,win):
         if self.value!=False:
@@ -733,6 +763,7 @@ class InputInteger(Input):
     def __init__(self):
         super(InputInteger,self).__init__()
         self.maxw=9
+        self.h=1
 
     def draw(self,win):
         if self.value!=False:
@@ -746,6 +777,7 @@ class InputFloat(Input):
     def __init__(self):
         super(InputFloat,self).__init__()
         self.maxw=12
+        self.h=1
 
     def draw(self,win):
         if self.value!=False:
@@ -759,6 +791,7 @@ class InputSelect(Input):
     def __init__(self):
         super(InputSelect,self).__init__()
         self.selection=[]
+        self.h=1
 
     def set_selection(self,sel):
         self.selection=sel
@@ -784,7 +817,7 @@ class InputSelect(Input):
 class InputText(Input):
     def __init__(self):
         super(InputText,self).__init__()
-        self.height=5
+        self.h=5
 
     def draw(self,win):
         s=" "*self.w
@@ -794,6 +827,7 @@ class InputBoolean(Input):
     def __init__(self):
         super(InputBoolean,self).__init__()
         self.maxw=1
+        self.h=1
 
     def draw(self,win):
         s=(self.value and "Y" or "N")[:self.w]
@@ -804,6 +838,7 @@ class InputDate(Input):
     def __init__(self):
         super(InputDate,self).__init__()
         self.maxw=10
+        self.h=1
 
     def draw(self,win):
         if self.value!=False:
@@ -817,6 +852,7 @@ class InputDatetime(Input):
     def __init__(self):
         super(InputDatetime,self).__init__()
         self.maxw=19
+        self.h=1
 
     def draw(self,win):
         if self.value!=False:
@@ -830,6 +866,7 @@ class InputM2O(Input):
     def __init__(self):
         super(InputM2O,self).__init__()
         self.relation=None
+        self.h=1
 
     def draw(self,win):
         if self.value!=False:
@@ -873,15 +910,22 @@ class TreeWindow(HorizontalPanel):
         super(TreeWindow,self).__init__()
         self.field_parent=None
         self.root_list=ListView()
+        self.root_list.set_cols(["name"])
+        self.root_list.h=23
+        self.root_list.borders=[0,0,0,0]
         self.add(self.root_list)
 
     def parse_tree(self,el,fields):
         if el.tag=="tree":
             wg=TreeView()
             names=[]
+            headers=[]
             for child in el:
-                names.append(child.attrib["name"])
-            wg.field_names=names
+                name=child.attrib["name"]
+                field=fields[name]
+                names.append(name)
+                headers.append(field["string"])
+            wg.set_cols(names,headers)
             return wg
 
     def load_view(self):
@@ -890,19 +934,19 @@ class TreeWindow(HorizontalPanel):
         self.fields=self.view["fields"]
         self.arch=xml.etree.ElementTree.fromstring(self.view["arch"])
         self.tree=self.parse_tree(self.arch,self.fields)
+        self.tree.h=23
+        self.tree.maxw=-1
+        self.tree.borders=[0,0,0,0]
+        self.tree.seps=[[(1,True),(0,False)],[(1,True)]]
         self.add(self.tree)
 
     def load_data(self):
         self.root_ids=rpc_exec(self.model,"search",self.domain)
         self.root_objs=rpc_exec(self.model,"read",self.root_ids,["name",self.field_parent])
-        self.root_list.set_vals(self.root_objs)
+        self.root_list.add_lines(self.root_objs)
         self.obj_ids=self.root_objs[0][self.field_parent]
-        self.objs=rpc_exec(self.model,"read",self.obj_ids,self.tree.field_names)
-        self.tree.set_vals(self.objs)
-
-    def draw(self,win):
-        self.root_list.draw(win)
-        self.tree.draw(win)
+        self.objs=rpc_exec(self.model,"read",self.obj_ids,self.tree.names)
+        self.tree.add_lines(self.objs)
 
 class FormWindow(DeckPanel):
     def __init__(self):
@@ -1055,25 +1099,6 @@ class FormWindow(DeckPanel):
         elif self.mode=="form":
             self.obj=rpc_exec(self.relation,"read",[self.obj_id],self.form_fields.keys())[0]
             self.form.set_vals(self.obj)
-
-class TabPanel(DeckPanel):
-    def __init__(self):
-        super(TabPanel,self).__init__()
-        self.can_focus=True
-
-    def draw(self,win):
-        x=self.x
-        i=0
-        for wg in self._childs:
-            s="%d %s "%(i+1,wg.name)
-            if wg==self.cur_wg:
-                win.addstr(self.y,x,s,curses.A_REVERSE)
-            else:
-                win.addstr(self.y,x,s)
-            i+=1
-            x+=len(s)
-        for wg in self._childs:
-            wg.draw(win)
 
 def view_to_s(el,d=0):
     s="  "*d+el.tag
