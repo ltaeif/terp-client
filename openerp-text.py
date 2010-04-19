@@ -176,12 +176,12 @@ class Widget(object):
     def set_event_path(self,source):
         self.contains_event_source=self==source
 
-    def process_event(self,type,param):
+    def process_event(self,type,param,source):
         if not self.contains_event_source:
             return
         for capture in (True,False):
             for listener in self.listeners[type][capture]:
-                listener(param)
+                listener(param,source)
 
     def find_focusable(self):
         if self.can_focus:
@@ -195,12 +195,9 @@ class Panel(Widget):
     def __init__(self):
         super(Panel,self).__init__()
         self._childs=[]
-        self._focused_wg=None
 
     def add(self,wg):
         self._childs.append(wg)
-        if not self._focused_wg and wg.can_focus:
-            self._focused_wg=wg
 
     def to_s(self,d=0):
         s=super(Panel,self).to_s(d)
@@ -239,15 +236,15 @@ class Panel(Widget):
                 break
         self.contains_event_source=contains
 
-    def process_event(self,type,param):
+    def process_event(self,type,param,source):
         if not self.contains_event_source:
             return
         for listener in self.listeners[type][True]:
-            listener(param)
+            listener(param,source)
         for wg in self._childs:
             wg.process_event(type,param)
         for listener in self.listeners[type][False]:
-            listener(param)
+            listener(param,source)
 
     def find_focusable(self):
         for wg in self._childs:
@@ -608,13 +605,14 @@ class HorizontalPanel(Table):
         super(HorizontalPanel,self).add(wg)
 
 class ListView(Table):
-    def on_keypress(self,k):
+    def on_keypress(self,k,source):
         if k==ord("\n"):
             if not wg_focus:
                 raise Exception("no line selected")
-            i=self._childs.index(wg_focus)
+            i=self._childs.index(source)
             line_no=i/self.col
-            self.process_event("select",line_no)
+            # XXX event path???
+            self.process_event("select",line_no,source)
 
     def __init__(self):
         super(ListView,self).__init__()
@@ -1133,7 +1131,7 @@ def act_window_form(act):
     tab_panel.add(win)
     tab_panel.compute(80,0,0)
     tab_panel.draw(screen)
-    tab_panel.set_focus()
+    tab_panel.set_cursor()
     screen.refresh()
 
 def act_window(act_id):
@@ -1166,7 +1164,7 @@ def start(stdscr):
     while 1:
         k=screen.getch()
         tab_panel.set_event_path(wg_f)
-        tab_panel.process_event("keypress",k)
+        tab_panel.process_event("keypress",k,wg_f)
         if k in (ord("\t"),curses.KEY_DOWN):
             ind=tab_panel.get_tabindex()
             i=ind.index(wg_f)
