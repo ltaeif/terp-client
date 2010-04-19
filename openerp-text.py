@@ -2,7 +2,7 @@
 ##############################################################################
 #
 #    OpenERP-Text: Text-Mode Client for OpenERP
-#    Copyright (C) 2010 David Janssens <david.j@almacom.co.th>
+#    Copyright (C) 2010 Almacom (Thailand) Ltd.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -114,6 +114,7 @@ class Widget(object):
         self.readonly=False
         self.invisible=False
         self.states=None
+        self.key_press_handlers=[]
 
     def set_field_attrs(self,attrs):
         for k,v in attrs.items():
@@ -182,7 +183,25 @@ class Widget(object):
             return []
 
     def key_pressed(self,k):
-        pass
+        wg_f=self.get_focused()
+        if not wg_f or wg_f==self:
+            raise Exception("can not find focused widget")
+        if k in (ord("\t"),curses.KEY_DOWN):
+            ind=self.get_tabindex()
+            i=ind.index(wg_f)
+            i=(i+1)%len(ind)
+            ind[i].set_focus()
+            wg_f.has_focus=False
+        elif k==curses.KEY_UP:
+            ind=self.get_tabindex()
+            i=ind.index(wg_f)
+            i=(i-1)%len(ind)
+            ind[i].set_focus()
+            wg_f.has_focus=False
+        else:
+            wg_f.key_pressed(k)
+        for handler in self.key_press_handlers:
+            handler(k)
 
 class Panel(Widget):
     def __init__(self):
@@ -317,7 +336,6 @@ class DeckPanel(Panel):
 class TabPanel(DeckPanel):
     def __init__(self):
         super(TabPanel,self).__init__()
-        self.can_focus=True
         self.borders=[1,0,0,0]
 
     def draw(self,win):
@@ -364,6 +382,7 @@ class Notebook(DeckPanel):
         if not wg:
             return None
         screen.move(self.y,self.x+3)
+        return wg
 
 class Table(Panel):
     def __init__(self):
@@ -594,24 +613,6 @@ class Form(Table):
                 else:
                     raise Exception("attribute can not be updated: %s"%k)
 
-    def key_pressed(self,k):
-        wg_f=self.get_focused()
-        if k in (ord("\t"),curses.KEY_DOWN):
-            ind=self.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i+1)%len(ind)
-            ind[i].set_focus()
-            wg_f.has_focus=False
-        elif k==curses.KEY_UP:
-            ind=self.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i-1)%len(ind)
-            ind[i].set_focus()
-            wg_f.has_focus=False
-        else:
-            set_trace()
-            wg_f.key_pressed(k)
-
 class Group(Table):
     def __init__(self):
         super(Group,self).__init__()
@@ -638,7 +639,8 @@ class ListView(Table):
         self.relation=None
         self.h=8
         self.borders=[1,1,1,1]
-        self.can_focus=True
+        self.selected=[]
+        self.line_select_handlers=[]
 
     def set_cols(self,names,headers=[]):
         self.names=names
@@ -656,6 +658,7 @@ class ListView(Table):
                 raise Exception("Missing field in line: %s"%name)
             val=str(line[name])
             wg=Label()
+            wg.can_focus=True
             wg.string=val
             wg.colspan=1
             self.add(wg)
@@ -671,7 +674,32 @@ class ListView(Table):
         wg=super(ListView,self).set_focus()
         if not wg:
             return None
-        screen.move(self.y+2,self.x+1)
+        screen.move(self.y+self.borders[0]+(self.headers and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
+        return wg
+
+    def draw(self,win):
+        super(ListView,self).draw(win)
+        x=self.x+self.borders[3]
+        w=self.w-self.borders[1]-self.borders[3]
+        for sel in self.selected:
+            wg=self._childs[sel*self.col]
+            y=wg.y
+            win.chgat(y,x,w,curses.A_BOLD)
+
+    def key_pressed(self,k):
+        if k==ord("\n"):
+            wg=self.get_focused()
+            if not wg:
+                raise Exception("no line selected")
+            i=self._childs.index(wg)
+            line_no=i/self.col
+            self.line_selected(line_no)
+        super(ListView,self).key_pressed(k)
+
+    def line_selected(self,line_no):
+        self.selected=[line_no]
+        for handler in self.line_select_handlers:
+            handler(line_no)
 
 class TreeView(ListView):
     pass
@@ -714,6 +742,7 @@ class Button(Widget):
         if not wg:
             return None
         screen.move(self.y,self.x+1)
+        return wg
 
 class FieldLabel(Widget):
     def __init__(self):
@@ -914,6 +943,13 @@ class TreeWindow(HorizontalPanel):
         self.root_list.h=23
         self.root_list.borders=[0,0,0,0]
         self.add(self.root_list)
+        def on_line_select(line_no):
+                self.cur_root=self.root_objs[line_no]
+                self.obj_ids=self.cur_root[self.field_parent]
+                self.objs=rpc_exec(self.model,"read",self.obj_ids,self.tree.names)
+                self.tree.delete_lines()
+                self.tree.add_lines(self.objs)
+        self.root_list.line_select_handlers.append(on_line_select)
 
     def parse_tree(self,el,fields):
         if el.tag=="tree":
@@ -944,9 +980,6 @@ class TreeWindow(HorizontalPanel):
         self.root_ids=rpc_exec(self.model,"search",self.domain)
         self.root_objs=rpc_exec(self.model,"read",self.root_ids,["name",self.field_parent])
         self.root_list.add_lines(self.root_objs)
-        self.obj_ids=self.root_objs[0][self.field_parent]
-        self.objs=rpc_exec(self.model,"read",self.obj_ids,self.tree.names)
-        self.tree.add_lines(self.objs)
 
 class FormWindow(DeckPanel):
     def __init__(self):
@@ -1122,6 +1155,7 @@ def act_window_tree(act):
     tab_panel.compute(80,0,0)
     tab_panel.draw(screen)
     tab_panel.set_focus()
+    tab_panel.key_pressed(ord("\n"))
     screen.refresh()
 
 def act_window_form(act):
