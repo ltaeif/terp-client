@@ -114,7 +114,9 @@ class Widget(object):
         self.readonly=False
         self.invisible=False
         self.states=None
-        self.key_press_handlers=[]
+        self.listeners={
+            "keypress": {True:[],False:[]},
+        }
 
     def set_field_attrs(self,attrs):
         for k,v in attrs.items():
@@ -161,20 +163,7 @@ class Widget(object):
         return s
 
     def draw(self,win):
-        pass
-
-    def set_focus(self):
-        if self.can_focus and not self.readonly:
-            self.has_focus=True
-            screen.move(self.y,self.x)
-            return self
-        else:
-            return None
-
-    def get_focused(self):
-        if self.has_focus:
-            return self
-        return None
+        raise Exception("method not implemented")
 
     def get_tabindex(self):
         if self.can_focus and not self.readonly:
@@ -182,26 +171,30 @@ class Widget(object):
         else:
             return []
 
-    def key_pressed(self,k):
-        wg_f=self.get_focused()
-        if not wg_f or wg_f==self:
-            raise Exception("can not find focused widget")
-        if k in (ord("\t"),curses.KEY_DOWN):
-            ind=self.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i+1)%len(ind)
-            ind[i].set_focus()
-            wg_f.has_focus=False
-        elif k==curses.KEY_UP:
-            ind=self.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i-1)%len(ind)
-            ind[i].set_focus()
-            wg_f.has_focus=False
-        else:
-            wg_f.key_pressed(k)
-        for handler in self.key_press_handlers:
-            handler(k)
+    def add_event_listener(type,listener,capture=False):
+        self.listeners[type][capture].append(listener)
+
+    def set_event_path(self,source):
+        self.contains_event_source=self==source
+
+    def process_event(self,type,param):
+        if not self.contains_event_source:
+            return
+        for capture in (True,False):
+            for listener in self.listeners[type][capture]:
+                listener(param)
+
+    def find_focusable(self):
+        if self.can_focus:
+            return self
+        return None
+
+    def change_focus(self):
+        self.has_focus=True
+        screen.move(self.y,self.x)
+
+    def remove_focus(self):
+        self.has_focus=False
 
 class Panel(Widget):
     def __init__(self):
@@ -242,23 +235,32 @@ class Panel(Widget):
         for c in self._childs:
             c.set_vals(vals)
 
-    def set_focus(self):
-        wg_f=super(Panel,self).set_focus()
-        if wg_f:
-            return wg_f
+    def set_event_path(source):
+        contains=False
         for wg in self._childs:
-            wg_f=wg.set_focus()
-            if wg_f:
-                return wg_f
-        return None
+            wg.set_event_path(source)
+            if wg.contains_event_source:
+                contains=True
+                break
+        self.contains_event_source=contains
 
-    def get_focused(self):
-        if self.has_focus:
-            return self
+    def process_event(self,type,param):
+        if not self.contains_event_source:
+            return
+        for listener in self.listeners[type][True]:
+            listener(param)
         for wg in self._childs:
-            wg_f=wg.get_focused()
+            wg.process_event(type,param)
+        for listener in self.listeners[type][False]:
+            listener(param)
+
+    def find_focusable(self):
+        for wg in self._childs:
+            wg_f=wg.find_focusable()
             if wg_f:
                 return wg_f
+        if self.can_focus:
+            return self
         return None
 
     def get_tabindex(self):
@@ -634,13 +636,24 @@ class HorizontalPanel(Table):
         super(HorizontalPanel,self).add(wg)
 
 class ListView(Table):
+    def on_keypress(self,k):
+        if k==ord("\n"):
+            if not wg_focus:
+                raise Exception("no line selected")
+            i=self._childs.index(wg_focus)
+            line_no=i/self.col
+            self.process_event("select",line_no)
+
     def __init__(self):
         super(ListView,self).__init__()
         self.relation=None
         self.h=8
         self.borders=[1,1,1,1]
         self.selected=[]
-        self.line_select_handlers=[]
+        self.listeners.update({
+            "select": {True:[],False:[]},
+        })
+        self.add_event_listener("keypress",on_keypress,method=True)
 
     def set_cols(self,names,headers=[]):
         self.names=names
@@ -671,11 +684,7 @@ class ListView(Table):
         del self._childs[self.col:]
 
     def set_focus(self):
-        wg=super(ListView,self).set_focus()
-        if not wg:
-            return None
         screen.move(self.y+self.borders[0]+(self.headers and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
-        return wg
 
     def draw(self,win):
         super(ListView,self).draw(win)
@@ -685,16 +694,6 @@ class ListView(Table):
             wg=self._childs[sel*self.col]
             y=wg.y
             win.chgat(y,x,w,curses.A_BOLD)
-
-    def key_pressed(self,k):
-        if k==ord("\n"):
-            wg=self.get_focused()
-            if not wg:
-                raise Exception("no line selected")
-            i=self._childs.index(wg)
-            line_no=i/self.col
-            self.line_selected(line_no)
-        super(ListView,self).key_pressed(k)
 
     def line_selected(self,line_no):
         self.selected=[line_no]
@@ -943,13 +942,13 @@ class TreeWindow(HorizontalPanel):
         self.root_list.h=23
         self.root_list.borders=[0,0,0,0]
         self.add(self.root_list)
-        def on_line_select(line_no):
-                self.cur_root=self.root_objs[line_no]
-                self.obj_ids=self.cur_root[self.field_parent]
-                self.objs=rpc_exec(self.model,"read",self.obj_ids,self.tree.names)
-                self.tree.delete_lines()
-                self.tree.add_lines(self.objs)
-        self.root_list.line_select_handlers.append(on_line_select)
+        def on_select(line_no):
+            self.cur_root=self.root_objs[line_no]
+            self.obj_ids=self.cur_root[self.field_parent]
+            self.objs=rpc_exec(self.model,"read",self.obj_ids,self.tree.names)
+            self.tree.delete_lines()
+            self.tree.add_lines(self.objs)
+        self.root_list.add_event_listener("select",on_select)
 
     def parse_tree(self,el,fields):
         if el.tag=="tree":
@@ -1154,7 +1153,7 @@ def act_window_tree(act):
     tab_panel.add(win)
     tab_panel.compute(80,0,0)
     tab_panel.draw(screen)
-    tab_panel.set_focus()
+    tab_panel.set_focus(None)
     tab_panel.key_pressed(ord("\n"))
     screen.refresh()
 
@@ -1196,8 +1195,25 @@ def start(stdscr):
     tab_panel=TabPanel()
     user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
     action(user["action_id"][0])
+    wg_f=tab_panel.find_focusable()
+    wg_f.set_focus()
     while 1:
         k=screen.getch()
-        tab_panel.key_pressed(k)
-
+        tab_panel.set_event_path(wg_f)
+        tab_panel.process_event("keypress",k)
+        if k in (ord("\t"),curses.KEY_DOWN):
+            ind=tab_panel.get_tabindex()
+            i=ind.index(wg_f)
+            i=(i+1)%len(ind)
+            wg_f.remove_focus()
+            wg_f=ind[i]
+            wg_f.set_focus()
+        elif k==curses.KEY_UP:
+            ind=tab_panel.get_tabindex()
+            i=ind.index(wg_focus)
+            i=(i-1)%len(ind)
+            wg_f.remove_focus()
+            wg_f=ind[i]
+            wg_f.set_focus()
+          tab_panel.set_focus(ind[i])
 curses.wrapper(start)
