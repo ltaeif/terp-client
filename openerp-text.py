@@ -103,7 +103,6 @@ class Widget(object):
         self.cx=None
         self.cy=None
         self.can_focus=False
-        self.has_focus=False
         self.field_attrs={}
         self.states_f={}
         self.view_attrs={}
@@ -189,12 +188,8 @@ class Widget(object):
             return self
         return None
 
-    def change_focus(self):
-        self.has_focus=True
+    def set_focus(self):
         screen.move(self.y,self.x)
-
-    def remove_focus(self):
-        self.has_focus=False
 
 class Panel(Widget):
     def __init__(self):
@@ -316,15 +311,6 @@ class DeckPanel(Panel):
             return wg_f
         if self.cur_wg:
             wg_f=self.cur_wg.set_focus()
-            if wg_f:
-                return wg_f
-        return None
-
-    def get_focused(self):
-        if self.has_focus:
-            return self
-        if self.cur_wg:
-            wg_f=self.cur_wg.get_focused()
             if wg_f:
                 return wg_f
         return None
