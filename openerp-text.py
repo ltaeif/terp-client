@@ -188,7 +188,7 @@ class Widget(object):
             return self
         return None
 
-    def set_focus(self):
+    def set_cursor(self):
         screen.move(self.y,self.x)
 
 class Panel(Widget):
@@ -305,16 +305,6 @@ class DeckPanel(Panel):
             return
         self.cur_wg.draw(win)
 
-    def set_focus(self):
-        wg_f=Widget.set_focus(self)
-        if wg_f:
-            return wg_f
-        if self.cur_wg:
-            wg_f=self.cur_wg.set_focus()
-            if wg_f:
-                return wg_f
-        return None
-
     def get_tabindex(self):
         ind=Widget.get_tabindex(self)
         if self.cur_wg:
@@ -365,12 +355,8 @@ class Notebook(DeckPanel):
         win.addch(self.y,x,curses.ACS_LTEE)
         super(Notebook,self).draw(win)
 
-    def set_focus(self):
-        wg=super(Notebook,self).set_focus()
-        if not wg:
-            return None
+    def set_cursor(self):
         screen.move(self.y,self.x+3)
-        return wg
 
 class Table(Panel):
     def __init__(self):
@@ -669,7 +655,7 @@ class ListView(Table):
     def delete_lines():
         del self._childs[self.col:]
 
-    def set_focus(self):
+    def set_cursor(self):
         screen.move(self.y+self.borders[0]+(self.headers and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
 
     def draw(self,win):
@@ -722,12 +708,8 @@ class Button(Widget):
         s="["+self.string[:self.w-2]+"]"
         win.addstr(self.y,self.x,s)
 
-    def set_focus(self):
-        wg=super(Button,self).set_focus()
-        if not wg:
-            return None
+    def set_cursor(self):
         screen.move(self.y,self.x+1)
-        return wg
 
 class FieldLabel(Widget):
     def __init__(self):
@@ -1139,8 +1121,6 @@ def act_window_tree(act):
     tab_panel.add(win)
     tab_panel.compute(80,0,0)
     tab_panel.draw(screen)
-    tab_panel.set_focus(None)
-    tab_panel.key_pressed(ord("\n"))
     screen.refresh()
 
 def act_window_form(act):
@@ -1182,7 +1162,7 @@ def start(stdscr):
     user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
     action(user["action_id"][0])
     wg_f=tab_panel.find_focusable()
-    wg_f.set_focus()
+    wg_f.set_cursor()
     while 1:
         k=screen.getch()
         tab_panel.set_event_path(wg_f)
@@ -1191,15 +1171,12 @@ def start(stdscr):
             ind=tab_panel.get_tabindex()
             i=ind.index(wg_f)
             i=(i+1)%len(ind)
-            wg_f.remove_focus()
             wg_f=ind[i]
-            wg_f.set_focus()
+            wg_f.set_cursor()
         elif k==curses.KEY_UP:
             ind=tab_panel.get_tabindex()
             i=ind.index(wg_focus)
             i=(i-1)%len(ind)
-            wg_f.remove_focus()
             wg_f=ind[i]
-            wg_f.set_focus()
-          tab_panel.set_focus(ind[i])
+            wg_f.set_cursor()
 curses.wrapper(start)
