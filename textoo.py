@@ -1,8 +1,8 @@
 #!/usr/bin/python
 ##############################################################################
 #
-#    OpenERP-Text: Text-Mode Client for OpenERP
-#    Copyright (C) 2010 Almacom (Thailand) Ltd.
+#    TextOO: Text-Mode Client for OpenObject/OpenERP
+#    Copyright (C) 2010 David Janssens (david.j@almacom.co.th)
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -196,7 +196,7 @@ class Widget(object):
         raise Exception("method not implemented")
 
     def get_tabindex(self):
-        if self.can_focus and not self.readonly:
+        if self.can_focus:
             return [self]
         else:
             return []
@@ -334,6 +334,15 @@ class DeckPanel(Panel):
     def set_cur_wg(self,wg):
         self.cur_wg=wg
 
+    def remove(self,wg):
+        i=self._childs.index(wg)
+        self._childs.pop(i)
+        if wg==self.cur_wg:
+            if self._childs:
+                self.cur_wg=self._childs[i%len(self._childs)]
+            else:
+                self.cur_wg=None
+
     def _compute_pass1(self):
         if not self._childs:
             return
@@ -384,6 +393,13 @@ class TabPanel(DeckPanel):
         super(TabPanel,self).__init__()
         self.borders=[1,0,0,0]
         self.can_focus=True
+        def on_keypress(k,source):
+            if k==ord('c'):
+                if source==self:
+                    self.remove(self.cur_wg)
+                    refresh_screen()
+                    update_cursor()
+        self.add_event_listener("keypress",on_keypress)
 
     def compute_tabs(self):
         x=self.x
@@ -677,6 +693,10 @@ class Table(Panel):
                 win.hline(y,x0+1,curses.ACS_HLINE,x1-x0-1)
                 win.addch(y,x0,curses.ACS_LTEE)
                 win.addch(y,x1,curses.ACS_RTEE)
+                for j in range(1,self.col):
+                    if self._get_sep_style("x",j):
+                        x=x0+self.w_left[j]
+                        win.addch(y,x+1,curses.ACS_PLUS)
         # draw cell contents
         super(Table,self).draw(win)
 
@@ -733,51 +753,47 @@ class ListView(Table):
         self.selected=[]
         self.lines=[]
         self.num_lines=0
+        self.has_header=True
+        self.names=None
         self.listeners.update({
             "select": [],
         })
         self.add_event_listener("keypress",self.on_keypress)
 
-    def set_cols(self,names,headers=[]):
-        self.names=names
-        self.headers=headers
-        self.col=len(names)
-        for s in headers:
+    def make_header(self,headers):
+        for header in headers:
             wg=Label()
-            wg.string=s
-            wg.colspan=1
+            wg.string=header
             self.add(wg)
+        self.has_header=True
 
-    def make_row(self,line):
-        row=[]
-        for name in self.names:
-            if not name in line:
-                raise Exception("Missing field in line: %s"%name)
-            val=str(line[name])
+    def make_line(self,vals):
+        line=[]
+        for i in range(self.col):
             wg=Label()
-            wg.can_focus=True
-            wg.string=val
-            wg.colspan=1
-            row.append(wg)
-        return row
+            wg.string=vals[self.names[i]]
+            if i==0:
+                wg.can_focus=True
+            line.append(wg)
+        return line
 
-    def add_line(self,line):
-        self.lines.append(line)
+    def add_line(self,vals):
+        self.lines.append(vals)
         self.num_lines+=1
-        row=self.make_row(line)
-        for wg in row:
+        line=self.make_line(vals)
+        for wg in line:
             self.add(wg)
 
     def add_lines(self,lines):
-        for line in lines:
-            self.add_line(line)
+        for vals in lines:
+            self.add_line(vals)
 
-    def insert_line(self,line_no,line):
-        self.lines.insert(line_no,line)
+    def insert_line(self,line_no,vals):
+        self.lines.insert(line_no,vals)
         self.num_lines+=1
-        row=self.make_row(line)
-        row_no=line_no+(self.headers and 1 or 0)
-        self.insert_row(row_no,row)
+        line=self.make_line(vals)
+        row_no=line_no+(self.has_header and 1 or 0)
+        self.insert_row(row_no,line)
 
     def insert_lines(self,line_no,lines):
         i=line_no
@@ -788,7 +804,7 @@ class ListView(Table):
     def delete_line(self,line_no):
         self.lines.pop(line_no)
         self.num_lines-=1
-        row_no=line_no+(self.headers and 1 or 0)
+        row_no=line_no+(self.has_header and 1 or 0)
         self.delete_row(row_no)
 
     def delete_lines(self,line_no=None,num=None):
@@ -801,7 +817,7 @@ class ListView(Table):
             self.delete_line(line_no)
 
     def set_cursor(self):
-        screen.move(self.y+self.borders[0]+(self.headers and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
+        screen.move(self.y+self.borders[0]+(self.has_header and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
 
     def draw(self,win):
         super(ListView,self).draw(win)
@@ -818,7 +834,7 @@ class TreeView(ListView):
             if source in self._childs:
                 i=self._childs.index(source)
                 row_no=i/self.col
-                line_no=row_no-(self.headers and 1 or 0)
+                line_no=row_no-(self.has_header and 1 or 0)
                 line=self.lines[line_no]
                 item=self.items[line["id"]]
                 if not line["_open"] and item[self.field_parent]:
@@ -831,7 +847,7 @@ class TreeView(ListView):
             if source in self._childs:
                 i=self._childs.index(source)
                 row_no=i/self.col
-                line_no=row_no-(self.headers and 1 or 0)
+                line_no=row_no-(self.has_header and 1 or 0)
                 line=self.lines[line_no]
                 item=self.items[line["id"]]
                 if line["_open"]:
@@ -847,7 +863,7 @@ class TreeView(ListView):
             if source in self._childs:
                 i=self._childs.index(source)
                 row_no=i/self.col
-                line_no=row_no-(self.headers and 1 or 0)
+                line_no=row_no-(self.has_header and 1 or 0)
                 self.process_event("select",line_no,self)
 
     def __init__(self):
@@ -893,7 +909,8 @@ class Label(Widget):
         self.maxw=len(self.string)
 
     def draw(self,win):
-        win.addstr(self.y,self.x,self.string)
+        s=self.string[:self.w]
+        win.addstr(self.y,self.x,s)
 
 class Separator(Widget):
     def __init__(self):
@@ -945,6 +962,24 @@ class Input(Widget):
         self.name=None
         self.value=False
         self.can_focus=True
+        self.h=1
+        self.under=True
+
+    def to_string(self):
+        if self.value is False:
+            return ""
+        return str(self.value)
+
+    def draw(self,win):
+        s=self.to_string()[:self.w]
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,self.under and curses.A_UNDERLINE or 0)
+
+    def _compute_pass1(self):
+        if self.readonly:
+            self.maxw=len(self.to_string())
+        else:
+            self.maxw=-1
 
     def set_vals(self,vals):
         super(Input,self).set_vals(vals)
@@ -952,78 +987,26 @@ class Input(Widget):
             self.value=vals[self.name]
 
 class InputChar(Input):
-    def __init__(self):
-        super(InputChar,self).__init__()
-        self.size=None
-        self.value=""
-        self.h=1
-        self.maxw=-1
-
-    def draw(self,win):
-        if self.value!=False:
-            s=self.value[:self.w]
-        else:
-            s=""
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
-
-    def validate(self,val):
-        return val
+    pass
 
 class InputInteger(Input):
-    def __init__(self):
-        super(InputInteger,self).__init__()
-        self.maxw=9
-        self.h=1
-
-    def draw(self,win):
-        if self.value!=False:
-            s=str(self.value)[:self.w]
-        else:
-            s=""
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+    pass
 
 class InputFloat(Input):
-    def __init__(self):
-        super(InputFloat,self).__init__()
-        self.maxw=12
-        self.h=1
-
-    def draw(self,win):
-        if self.value!=False:
-            s=str(self.value)[:self.w]
-        else:
-            s=""
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+    pass
 
 class InputSelect(Input):
     def __init__(self):
         super(InputSelect,self).__init__()
         self.selection=[]
-        self.h=1
 
-    def set_selection(self,sel):
-        self.selection=sel
-        self.maxw=0
-        for k,v in sel:
-            self.maxw=max(self.maxw,len(v))
-
-    def draw(self,win):
-        if self.value!=False:
-            s=None
-            for k,v in self.selection:
-                if k==self.value:
-                    s=v
-                    break
-            if not s:
-                raise Exception("invalid selection value: %s"%self.value)
-            s=s[:self.w]
-        else:
-            s=""
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+    def to_string(self):
+        if self.value is False:
+            return ""
+        for k,v in self.selection:
+            if k==self.value:
+                return v
+        raise Exception("invalid selection value: %s"%self.value)
 
 class InputText(Input):
     def __init__(self):
@@ -1038,58 +1021,18 @@ class InputText(Input):
         screen.move(self.y+1,self.x+1)
 
 class InputBoolean(Input):
-    def __init__(self):
-        super(InputBoolean,self).__init__()
-        self.maxw=1
-        self.h=1
-
-    def draw(self,win):
-        s=(self.value and "Y" or "N")[:self.w]
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+    def to_string(self):
+        return self.value and "Y" or "N"
 
 class InputDate(Input):
-    def __init__(self):
-        super(InputDate,self).__init__()
-        self.maxw=10
-        self.h=1
-
-    def draw(self,win):
-        if self.value!=False:
-            s=self.value[:self.w]
-        else:
-            s=""
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+    pass
 
 class InputDatetime(Input):
-    def __init__(self):
-        super(InputDatetime,self).__init__()
-        self.maxw=19
-        self.h=1
-
-    def draw(self,win):
-        if self.value!=False:
-            s=self.value[:self.w]
-        else:
-            s=""
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+    pass
 
 class InputM2O(Input):
-    def __init__(self):
-        super(InputM2O,self).__init__()
-        self.relation=None
-        self.h=1
-        self.maxw=-1
-
-    def draw(self,win):
-        if self.value!=False:
-            s=self.value[1][:self.w]
-        else:
-            s=""
-        s+=" "*(self.w-len(s))
-        win.addstr(self.y,self.x,s,curses.A_UNDERLINE)
+    def to_string(self):
+        return self.value and self.value[1] or ""
 
 class InputO2M(DeckPanel):
     def __init__(self):
@@ -1136,7 +1079,8 @@ class TreeWindow(HorizontalPanel):
         self.name=act["name"]
         self.field_parent=None
         self.root_list=ListView()
-        self.root_list.set_cols(["name"])
+        self.root_list.col=1
+        self.root_list.names=["name"]
         self.root_list.h=23
         self.root_list.borders=[0,0,0,0]
         self.add(self.root_list)
@@ -1146,7 +1090,7 @@ class TreeWindow(HorizontalPanel):
             ids=self.cur_root[self.field_parent]
             new_ids=[id for id in self.cur_root[self.field_parent] if not id in self.objs]
             if new_ids:
-                objs=rpc_exec(self.model,"read",new_ids,self.tree.names+[self.field_parent])
+                objs=rpc_exec(self.model,"read",new_ids,self.fields.keys()+[self.field_parent])
                 for obj in objs:
                     self.objs[obj["id"]]=obj
             objs=[self.objs[id] for id in ids]
@@ -1161,14 +1105,52 @@ class TreeWindow(HorizontalPanel):
     def parse_tree(self,el,fields):
         if el.tag=="tree":
             wg=TreeView()
-            names=[]
             headers=[]
             for child in el:
                 name=child.attrib["name"]
-                field=fields[name]
-                names.append(name)
-                headers.append(field["string"])
-            wg.set_cols(names,headers)
+                if child.tag=="field":
+                    field=fields[name]
+                    header=field["string"]
+                else:
+                    header=child.attrib["string"]
+                headers.append(header)
+            wg.col=len(headers)
+            wg.make_header(headers)
+            def make_line(vals):
+                line=[]
+                i=0
+                for child in el:
+                    if child.tag=="field":
+                        name=child.attrib["name"]
+                        field=fields[name]
+                        if field["type"]=="char":
+                            wg=InputChar()
+                        elif field["type"]=="integer":
+                            wg=InputInteger()
+                        elif field["type"]=="float":
+                            wg=InputFloat()
+                        elif field["type"]=="boolean":
+                            wg=InputBoolean()
+                        elif field["type"]=="date":
+                            wg=InputDate()
+                        elif field["type"]=="datetime":
+                            wg=InputDatetime()
+                        elif field["type"]=="text":
+                            wg=InputText()
+                        elif field["type"]=="selection":
+                            wg=InputSelect()
+                            wg.selection=field["selection"]
+                        wg.readonly=True
+                        wg.under=False
+                        wg.value=vals[name]
+                    elif child.tag=="button":
+                        wg=Button()
+                    if i==0:
+                        wg.can_focus=True
+                    line.append(wg)
+                    i+=1
+                return line
+            wg.make_line=make_line
             return wg
 
     def load_view(self):
@@ -1186,14 +1168,15 @@ class TreeWindow(HorizontalPanel):
         def on_open(item,source):
             ids=[id for id in item[self.field_parent] if not id in self.tree.items]
             if ids:
-                objs=rpc_exec(self.model,"read",item[self.field_parent],self.tree.names+[self.field_parent])
+                objs=rpc_exec(self.model,"read",item[self.field_parent],self.fields.keys()+[self.field_parent])
                 self.tree.add_items(objs)
         self.tree.add_event_listener("open",on_open)
         def on_select(line_no,source):
             obj=self.tree.lines[line_no]
             res=rpc_exec("ir.values","get","action","tree_but_open",[(self.model,obj["id"])])
-            act=res[0][2]
-            action(act["id"],_act=act)
+            if res:
+                act=res[0][2]
+                action(act["id"],_act=act)
         self.tree.add_event_listener("select",on_select)
 
     def load_data(self):
@@ -1216,14 +1199,59 @@ class FormWindow(DeckPanel):
 
     def parse_tree(self,el,fields):
         if el.tag=="tree":
-            wg=Listview()
+            wg=ListView()
+            headers=[]
             for child in el:
-                headers=[]
+                name=child.attrib["name"]
                 if child.tag=="field":
-                    name=child.attrib["name"]
                     field=fields[name]
-                    headers.append((name,field["string"]))
-                wg.headers=headers
+                    header=field["string"]
+                else:
+                    header=child.attrib["string"]
+                headers.append(header)
+            wg.col=len(headers)
+            wg.make_header(headers)
+            wg.maxw=-1
+            wg.h=23
+            wg.seps=[[(1,True),(0,False)],[(1,True)]]
+            def make_line(vals):
+                line=[]
+                i=0
+                for child in el:
+                    if child.tag=="field":
+                        name=child.attrib["name"]
+                        field=fields[name]
+                        if field["type"]=="char":
+                            wg=InputChar()
+                        elif field["type"]=="integer":
+                            wg=InputInteger()
+                        elif field["type"]=="float":
+                            wg=InputFloat()
+                        elif field["type"]=="boolean":
+                            wg=InputBoolean()
+                        elif field["type"]=="date":
+                            wg=InputDate()
+                        elif field["type"]=="datetime":
+                            wg=InputDatetime()
+                        elif field["type"]=="text":
+                            wg=InputText()
+                        elif field["type"]=="selection":
+                            wg=InputSelect()
+                            wg.selection=field["selection"]
+                        elif field["type"]=="many2one":
+                            wg=InputM2O()
+                        else:
+                            raise Exception("invalid field type: %s"%field["type"])
+                        wg.readonly=True
+                        wg.under=False
+                        wg.value=vals[name]
+                    elif child.tag=="button":
+                        wg=Button()
+                    wg.can_focus=i==0
+                    line.append(wg)
+                    i+=1
+                return line
+            wg.make_line=make_line
         return wg
 
     def parse_form(self,el,fields=None,panel=None):
@@ -1235,15 +1263,56 @@ class FormWindow(DeckPanel):
             return wg
         elif el.tag=="tree":
             wg=ListView()
-            names=[]
             headers=[]
             for child in el:
                 name=child.attrib["name"]
-                field=fields[name]
-                names.append(name)
-                headers.append(field["string"])
-            wg.set_cols(names,headers)
+                if child.tag=="field":
+                    field=fields[name]
+                    header=field["string"]
+                else:
+                    header=child.attrib["string"]
+                headers.append(header)
+            wg.col=len(headers)
+            wg.make_header(headers)
             wg.maxw=-1
+            def make_line(vals):
+                line=[]
+                i=0
+                for child in el:
+                    if child.tag=="field":
+                        name=child.attrib["name"]
+                        field=fields[name]
+                        if field["type"]=="char":
+                            wg=InputChar()
+                        elif field["type"]=="integer":
+                            wg=InputInteger()
+                        elif field["type"]=="float":
+                            wg=InputFloat()
+                        elif field["type"]=="boolean":
+                            wg=InputBoolean()
+                        elif field["type"]=="date":
+                            wg=InputDate()
+                        elif field["type"]=="datetime":
+                            wg=InputDatetime()
+                        elif field["type"]=="text":
+                            wg=InputText()
+                        elif field["type"]=="selection":
+                            wg=InputSelect()
+                            wg.selection=field["selection"]
+                        elif field["type"]=="many2one":
+                            wg=InputM2O()
+                        else:
+                            raise Exception("invalid field type: %s"%field["type"])
+                        wg.readonly=True
+                        wg.under=False
+                        wg.value=vals[name]
+                    elif child.tag=="button":
+                        wg=Button()
+                    wg.can_focus=i==0
+                    line.append(wg)
+                    i+=1
+                return line
+            wg.make_line=make_line
             return wg
         elif el.tag=="label":
             wg=Label()
@@ -1286,7 +1355,7 @@ class FormWindow(DeckPanel):
                 wg=InputText()
             elif field["type"]=="selection":
                 wg=InputSelect()
-                wg.set_selection(field["selection"])
+                wg.selection=field["selection"]
             elif field["type"]=="many2one":
                 wg=InputM2O()
             elif field["type"]=="one2many":
@@ -1361,9 +1430,11 @@ class FormWindow(DeckPanel):
 
     def load_data(self):
         if self.mode=="tree":
-            self.obj_ids=rpc_exec(self.model,"search",self.domain)
+            offset=0
+            limit=20
+            self.obj_ids=rpc_exec(self.model,"search",self.domain,offset,limit)
             self.objs=rpc_exec(self.model,"read",self.obj_ids,self.fields["tree"].keys())
-            self.tree.set_vals(self.objs)
+            self.tree.add_lines(self.objs)
         elif self.mode=="form":
             #self.obj=rpc_exec(self.model,"read",[self.obj_id],self.fields["form"].keys())[0]
             self.obj=rpc_exec(self.model,"default_get",self.fields["form"].keys())
