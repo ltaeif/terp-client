@@ -1,7 +1,7 @@
 #!/usr/bin/python
 ##############################################################################
 #
-#    TextOO: Text-Mode Client for OpenObject/OpenERP
+#    OpenERP-Text: Text-Mode Client for OpenERP
 #    Copyright (C) 2010 Almacom (Thailand) Ltd.
 #
 #    This program is free software: you can redistribute it and/or modify
