@@ -2,7 +2,7 @@
 ##############################################################################
 #
 #    TextOO: Text-Mode Client for OpenObject/OpenERP
-#    Copyright (C) 2010 David Janssens (david.j@almacom.co.th)
+#    Copyright (C) 2010 Almacom (Thailand) Ltd.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -708,6 +708,14 @@ class Form(Table):
         self.seps=[[(0,False)],[(1,False)]]
         self.col=4
 
+    def draw(self,win):
+        super(Form,self).draw(win)
+        win.addch(self.y,self.x+self.w-6,curses.ACS_RTEE)
+        win.addstr(self.y,self.x+self.w-5,"L")
+        win.addch(self.y,self.x+self.w-4,curses.ACS_VLINE)
+        win.addstr(self.y,self.x+self.w-3,"F")
+        win.addch(self.y,self.x+self.w-2,curses.ACS_LTEE)
+
 class Group(Table):
     def __init__(self):
         super(Group,self).__init__()
@@ -821,6 +829,11 @@ class ListView(Table):
 
     def draw(self,win):
         super(ListView,self).draw(win)
+        win.addch(self.y,self.x+self.w-6,curses.ACS_RTEE)
+        win.addstr(self.y,self.x+self.w-5,"L")
+        win.addch(self.y,self.x+self.w-4,curses.ACS_VLINE)
+        win.addstr(self.y,self.x+self.w-3,"F")
+        win.addch(self.y,self.x+self.w-2,curses.ACS_LTEE)
         x=self.x+self.borders[3]
         w=self.w-self.borders[1]-self.borders[3]
         for sel in self.selected:
