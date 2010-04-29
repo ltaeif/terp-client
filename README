@@ -1,0 +1,2 @@
+Example usage:
+./openerp-text.py -d test_db
