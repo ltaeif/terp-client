@@ -132,15 +132,15 @@ class Widget(object):
 
     def set_view_attrs(self,attrs):
         for k,v in attrs.items():
-            if k in ("string","name","on_change","domain","context","type","widget","mode","sum","icon","default_get"):
+            if k in ("string","name","on_change","domain","context","type","widget","sum","icon","default_get"):
                 val=v
             elif k in ("colspan","col"):
                 val=int(v)
             elif k in ("readonly","select","required","nolabel","invisible"):
                 val=eval(v) and True or False
-            elif k=="states":
+            elif k in ("states","mode","view_mode"):
                 val=v.split(",")
-            elif k=="attrs":
+            elif k in ("attrs"):
                 val=eval(v)
             else:
                 raise Exception("unsupported view attribute: %s"%k)
@@ -708,14 +708,6 @@ class Form(Table):
         self.seps=[[(0,False)],[(1,False)]]
         self.col=4
 
-    def draw(self,win):
-        super(Form,self).draw(win)
-        win.addch(self.y,self.x+self.w-6,curses.ACS_RTEE)
-        win.addstr(self.y,self.x+self.w-5,"L")
-        win.addch(self.y,self.x+self.w-4,curses.ACS_VLINE)
-        win.addstr(self.y,self.x+self.w-3,"F")
-        win.addch(self.y,self.x+self.w-2,curses.ACS_LTEE)
-
 class Group(Table):
     def __init__(self):
         super(Group,self).__init__()
@@ -750,6 +742,8 @@ class ListView(Table):
             if source in self._childs:
                 i=self._childs.index(source)
                 line_no=i/self.col
+                if self.has_header:
+                    line_no-=1
                 self.on_select(line_no)
 
     def __init__(self):
@@ -761,7 +755,7 @@ class ListView(Table):
         self.selected=[]
         self.lines=[]
         self.num_lines=0
-        self.has_header=True
+        self.has_header=False
         self.names=None
         self.listeners.update({
             "select": [],
@@ -829,17 +823,16 @@ class ListView(Table):
 
     def draw(self,win):
         super(ListView,self).draw(win)
-        win.addch(self.y,self.x+self.w-6,curses.ACS_RTEE)
-        win.addstr(self.y,self.x+self.w-5,"L")
-        win.addch(self.y,self.x+self.w-4,curses.ACS_VLINE)
-        win.addstr(self.y,self.x+self.w-3,"F")
-        win.addch(self.y,self.x+self.w-2,curses.ACS_LTEE)
         x=self.x+self.borders[3]
         w=self.w-self.borders[1]-self.borders[3]
         for sel in self.selected:
             wg=self._childs[sel*self.col]
             y=wg.y
             win.chgat(y,x,w,curses.A_BOLD)
+
+    def set_vals(self,lines):
+        self.delete_lines()
+        self.add_lines(lines)
 
 class TreeView(ListView):
     def on_keypress(self,k,source):
@@ -1000,7 +993,56 @@ class Input(Widget):
             self.value=vals[self.name]
 
 class InputChar(Input):
-    pass
+    def on_keypress(self,k,source):
+        if curses.ascii.isprint(k):
+            v=self.value or ""
+            self.value=v[:self.cur_pos]+chr(k)+v[self.cur_pos:]
+            self.cur_pos+=1
+            if self.cur_pos-self.cur_origin>self.w-1:
+                self.cur_origin=self.cur_pos-self.w+1
+            self.draw(screen)
+            self.set_cursor()
+        elif k==curses.KEY_LEFT:
+            self.cur_pos=max(self.cur_pos-1,0)
+            if self.cur_pos<self.cur_origin:
+                self.cur_origin=self.cur_pos
+                self.draw(screen)
+            self.set_cursor()
+        elif k==curses.KEY_RIGHT:
+            self.cur_pos=min(self.cur_pos+1,len(self.value))
+            if self.cur_pos-self.cur_origin>self.w-1:
+                self.cur_origin=self.cur_pos-self.w+1
+                self.draw(screen)
+            self.set_cursor()
+        elif k==263:
+            if self.cur_pos>=1:
+                v=self.value or ""
+                self.value=v[:self.cur_pos-1]+v[self.cur_pos:]
+                self.cur_pos-=1
+                if self.cur_pos<self.cur_origin:
+                    self.cur_origin=self.cur_pos
+                self.draw(screen)
+                self.set_cursor()
+        elif k==330:
+            v=self.value or ""
+            if self.cur_pos<=len(v)-1:
+                self.value=v[:self.cur_pos]+v[self.cur_pos+1:]
+                self.draw(screen)
+                self.set_cursor()
+
+    def __init__(self):
+        super(InputChar,self).__init__()
+        self.add_event_listener("keypress",self.on_keypress)
+        self.cur_pos=0
+        self.cur_origin=0
+
+    def set_cursor(self):
+        screen.move(self.y,self.x+self.cur_pos-self.cur_origin)
+
+    def draw(self,win):
+        s=self.to_string()[self.cur_origin:self.cur_origin+self.w]
+        s+=" "*(self.w-len(s))
+        win.addstr(self.y,self.x,s,self.under and curses.A_UNDERLINE or 0)
 
 class InputInteger(Input):
     pass
@@ -1047,54 +1089,19 @@ class InputM2O(Input):
     def to_string(self):
         return self.value and self.value[1] or ""
 
-class InputO2M(DeckPanel):
+class ObjTree(HorizontalPanel):
     def __init__(self):
-        super(InputO2M,self).__init__()
-        self.relation=None
-        self.tree=None
-        self.form=None
-        self.maxw=-1
-        self.can_focus=True
-
-    def set_cursor(self):
-        screen.move(self.y+2,self.x+1)
-
-    def add(self,wg,type="tree"):
-        super(InputO2M,self).add(wg)
-        if type=="tree":
-            self.tree=wg
-        elif type=="form":
-            self.form=wg
-        else:
-            raise Exception("Unsupported view type: %s"%type)
-
-    def _compute_pass1(self):
-        super(InputO2M,self)._compute_pass1()
-        self.h=self.tree.h
-
-class InputM2M(Panel):
-    def __init__(self):
-        super(InputM2M,self).__init__()
-        self.h=8
-        self.relation=None
-        self.maxw=-1
-
-    def draw(self,win):
-        curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
-
-class TreeWindow(HorizontalPanel):
-    def __init__(self,act):
-        super(TreeWindow,self).__init__()
-        self.model=act["res_model"]
-        self.domain=act["domain"] and eval(act["domain"]) or []
-        self.context=act["context"] and eval(act["context"]) or {}
-        self.view_id=act["view_id"][0]
-        self.name=act["name"]
+        super(ObjTree,self).__init__()
+        self.model=None
+        self.domain=None
+        self.context=None
+        self.view_id=None
+        self.name=None
         self.field_parent=None
         self.root_list=ListView()
         self.root_list.col=1
         self.root_list.names=["name"]
-        self.root_list.h=23
+        self.root_list.h=self.h
         self.root_list.borders=[0,0,0,0]
         self.add(self.root_list)
         self.objs={}
@@ -1173,7 +1180,7 @@ class TreeWindow(HorizontalPanel):
         self.arch=xml.etree.ElementTree.fromstring(self.view["arch"])
         self.tree=self.parse_tree(self.arch,self.fields)
         self.tree.field_parent=self.field_parent
-        self.tree.h=23
+        self.tree.h=self.h
         self.tree.maxw=-1
         self.tree.borders=[0,0,0,0]
         self.tree.seps=[[(1,True),(0,False)],[(1,True)]]
@@ -1198,17 +1205,37 @@ class TreeWindow(HorizontalPanel):
         self.root_list.add_lines(self.root_objs)
         self.root_list.on_select(0)
 
-class FormWindow(DeckPanel):
-    def __init__(self,act):
-        super(FormWindow,self).__init__()
-        self.model=act["res_model"]
-        self.domain=act["domain"] and eval(act["domain"]) or []
-        self.context=act["context"] and eval(act["context"]) or {}
-        self.modes=act["view_mode"].split(",")
-        self.name=act["name"]
-        self.mode=self.modes[0]
+class ObjList(DeckPanel):
+    def on_keypress(self,k,source):
+        if k==curses.KEY_RIGHT:
+            if source==self:
+                i=self.commands.index(self.cur_cmd)
+                i=(i+1)%len(self.commands)
+                self.cur_cmd=self.commands[i]
+                update_cursor()
+        elif k==curses.KEY_LEFT:
+            if source==self:
+                i=self.commands.index(self.cur_cmd)
+                i=(i-1)%len(self.commands)
+                self.cur_cmd=self.commands[i]
+                update_cursor()
+
+    def __init__(self):
+        super(ObjList,self).__init__()
+        self.model=None
+        self.obj_ids=None
+        self.context=None
+        self.modes=None
+        self.string=None
+        self.cur_mode=None
         self.view={}
         self.fields={}
+        self.active_id=None
+        self.tree=None
+        self.form=None
+        self.can_focus=True
+        self.commands=["N","S","D","<",">","L","F"]
+        self.cur_cmd="N"
 
     def parse_tree(self,el,fields):
         if el.tag=="tree":
@@ -1225,7 +1252,6 @@ class FormWindow(DeckPanel):
             wg.col=len(headers)
             wg.make_header(headers)
             wg.maxw=-1
-            wg.h=23
             wg.seps=[[(1,True),(0,False)],[(1,True)]]
             def make_line(vals):
                 line=[]
@@ -1373,29 +1399,15 @@ class FormWindow(DeckPanel):
                 wg=InputM2O()
             elif field["type"]=="one2many":
                 wg=InputO2M()
-                tree_view=field["views"].get("tree")
-                if not tree_view:
-                    tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
-                tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
-                wg_t=self.parse_form(tree_arch,fields=tree_view["fields"])
-                wg_t.relation=field["relation"]
-                wg.add(wg_t,"tree")
-                form_view=field["views"].get("form")
-                if not form_view:
-                    form_view=rpc_exec(field["relation"],"fields_view_get",False,"form",{})
-                form_arch=xml.etree.ElementTree.fromstring(form_view["arch"])
-                wg_f=self.parse_form(form_arch,fields=form_view["fields"])
-                wg_f.relation=field["relation"]
-                wg.add(wg_f,"form")
+                wg.model=field["relation"]
+                view_mode=el.attrib.get("view_mode") or "tree,form"
+                wg.modes=view_mode.split(",")
+                wg.cur_mode=wg.modes[0]
+                wg.load_view(views=field["views"])
             elif field["type"]=="many2many":
                 wg=InputM2M()
-                tree_view=field["views"].get("tree")
-                if not tree_view:
-                    tree_view=rpc_exec(field["relation"],"fields_view_get",False,"tree",{})
-                tree_arch=xml.etree.ElementTree.fromstring(tree_view["arch"])
-                wg_t=self.parse_form(tree_arch,fields=tree_view["fields"])
-                wg_t.relation=field["relation"]
-                wg.add(wg_t)
+                wg.model=field["relation"]
+                wg.load_view(views=field["views"])
             else:
                 raise Exception("unsupported field type: %s"%field["type"])
             wg.name=el.attrib["name"]
@@ -1425,40 +1437,113 @@ class FormWindow(DeckPanel):
         else:
             raise Exception("invalid tag: "+el.tag)
 
-    def load_view(self):
-        if self.mode=="tree":
-            view=rpc_exec(self.model,"fields_view_get",False,"tree",self.context)
+    def load_view(self,views=None):
+        if not self.cur_mode in ("tree","form"):
+            raise Exception("unsupported view mode: %s"%self.cur_mode)
+        if self.cur_mode=="tree" and not self.tree:
+            if views and "tree" in views:
+                view=views["tree"]
+            else:
+                view=rpc_exec(self.model,"fields_view_get",False,"tree",self.context or {})
             self.view["tree"]=view
             self.fields["tree"]=view["fields"]
             arch=xml.etree.ElementTree.fromstring(view["arch"])
             self.tree=self.parse_tree(arch,view["fields"])
+            self.tree.h=self.h
             self.add(self.tree)
-        elif self.mode=="form":
-            view=rpc_exec(self.model,"fields_view_get",False,"form",self.context)
+            def on_select(line_no,source):
+                self.active_id=self.objs[line_no]["id"]
+                self.cur_mode="form"
+                self.load_view()
+                self.load_data()
+                self.cur_wg=self.form
+                tab_panel.clear_focus()
+                tab_panel.set_focus()
+                refresh_screen()
+                update_cursor()
+            self.tree.add_event_listener("select",on_select)
+        elif self.cur_mode=="form" and not self.form:
+            if views and "form" in views:
+                view=views["form"]
+            else:
+                view=rpc_exec(self.model,"fields_view_get",False,"form",self.context or {})
             self.view["form"]=view
             self.fields["form"]=view["fields"]
             arch=xml.etree.ElementTree.fromstring(view["arch"])
             self.form=self.parse_form(arch,view["fields"])
             self.add(self.form)
 
+    def eval_context(self):
+        if not self.context:
+            return {}
+        return eval(self.context)
+
     def load_data(self):
-        if self.mode=="tree":
-            offset=0
-            limit=20
-            self.obj_ids=rpc_exec(self.model,"search",self.domain,offset,limit)
-            self.objs=rpc_exec(self.model,"read",self.obj_ids,self.fields["tree"].keys())
-            self.tree.add_lines(self.objs)
-        elif self.mode=="form":
-            #self.obj=rpc_exec(self.model,"read",[self.obj_id],self.fields["form"].keys())[0]
-            self.obj=rpc_exec(self.model,"default_get",self.fields["form"].keys())
-            for name,val in self.obj.items():
-                if val==False:
-                    continue
-                field=self.fields["form"][name]
-                if field["type"]=="many2one":
-                    val_=rpc_exec(field["relation"],"name_get",[val])[0]
-                    self.obj[name]=val_
+        if self.cur_mode=="tree":
+            self.objs=rpc_exec(self.model,"read",self.obj_ids,self.fields["tree"].keys(),self.eval_context() or {})
+            self.tree.set_vals(self.objs)
+        elif self.cur_mode=="form":
+            if self.active_id:
+                self.obj=rpc_exec(self.model,"read",[self.active_id],self.fields["form"].keys(),self.eval_context() or {})[0]
+            else:
+                self.obj=rpc_exec(self.model,"default_get",self.fields["form"].keys(),self.context or {})
+                for name,val in self.obj.items():
+                    if val==False:
+                        continue
+                    field=self.fields["form"][name]
+                    if field["type"]=="many2one":
+                        val_=rpc_exec(field["relation"],"name_get",[val])[0]
+                        self.obj[name]=val_
             self.form.set_vals(self.obj)
+
+    def draw(self,win):
+        super(ObjList,self).draw(win)
+        s=" ".join(self.commands)
+        x=self.x+self.w-len(s)-3
+        win.addch(self.y,x,curses.ACS_RTEE)
+        x+=1
+        win.addstr(self.y,x,s)
+        x+=len(s)
+        win.addch(self.y,x,curses.ACS_LTEE)
+
+    def set_cursor(self):
+        i=self.commands.index(self.cur_cmd)
+        x=self.x+self.w-len(self.commands)*2-1+i*2
+        screen.move(self.y,x)
+
+class TreeWindow(ObjTree):
+    def __init__(self):
+        super(TreeWindow,self).__init__()
+        self.name=None
+
+class ListWindow(ObjList):
+    def __init__(self):
+        super(ListWindow,self).__init__()
+        self.name=None
+
+class InputO2M(ObjList,Input):
+    def __init__(self):
+        super(InputO2M,self).__init__()
+        self.relation=None
+        self.maxw=-1
+        self.h=8
+
+    def set_vals(self,vals):
+        self.obj_ids=vals.get(self.name,[])
+        self.load_data()
+
+class InputM2M(ObjList,Input):
+    def __init__(self):
+        super(InputM2M,self).__init__()
+        self.h=8
+        self.relation=None
+        self.maxw=-1
+        self.modes=["tree"]
+        self.cur_mode="tree"
+
+    def set_vals(self,vals):
+        self.obj_ids=vals.get(self.name,[])
+        self.load_data()
 
 def view_to_s(el,d=0):
     s="  "*d+el.tag
@@ -1481,7 +1566,13 @@ def update_cursor():
         wg_f.set_cursor()
 
 def act_window_tree(act):
-    win=TreeWindow(act)
+    win=TreeWindow()
+    win.model=act["res_model"]
+    win.domain=act["domain"] and eval(act["domain"]) or []
+    win.context=act["context"] and eval(act["context"]) or {}
+    win.view_id=act["view_id"][0]
+    win.name=act["name"]
+    win.h=23
     win.load_view()
     win.load_data()
     tab_panel.add(win)
@@ -1492,7 +1583,15 @@ def act_window_tree(act):
     update_cursor()
 
 def act_window_form(act):
-    win=FormWindow(act)
+    win=ListWindow()
+    win.model=act["res_model"]
+    domain=act["domain"] and eval(act["domain"]) or ""
+    win.obj_ids=rpc_exec(act["res_model"],"search",domain,0,80)
+    win.context=act["context"] and eval(act["context"]) or ""
+    win.modes=act["view_mode"].split(",")
+    win.cur_mode=win.modes[0]
+    win.name=act["name"]
+    win.h=23
     win.load_view()
     win.load_data()
     tab_panel.add(win)
@@ -1535,7 +1634,7 @@ def start(stdscr):
     action(user["action_id"][0])
     while 1:
         k=screen.getch()
-        if k==ord("d"):
+        if k==ord("D"):
             global dbg_flag
             dbg_flag^=1
         wg_f=tab_panel.get_focus()

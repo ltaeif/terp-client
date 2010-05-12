@@ -1,2 +1,2 @@
 Example usage:
-./openerp-text.py -d test_db
+./openerp-text.py -d test_db -u 1 -p admin
