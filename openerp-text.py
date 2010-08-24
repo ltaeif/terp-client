@@ -1,8 +1,8 @@
 #!/usr/bin/python
 ##############################################################################
 #
-#    OpenERP-Text: Text-Mode Client for OpenERP
-#    Copyright (C) 2010 Almacom (Thailand) Ltd.
+#    OpenERP Text Client
+#    Copyright (C) 2010 by Almacom (Thailand) Ltd.
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
