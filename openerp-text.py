@@ -22,7 +22,6 @@
 from optparse import OptionParser
 import curses
 import curses.textpad
-import curses.panel
 import sys
 import time
 import xmlrpclib
@@ -55,11 +54,14 @@ passwd=opts.passwd
 
 screen=None
 root_panel=None
+log_file=file("/tmp/openerp-text.log","a")
 
 def log(*args):
+    if not log_file:
+        return
     msg=" ".join([str(a) for a in args])
-    screen.addstr(msg+"\n")
-    screen.refresh()
+    log_file.write(msg+"\n")
+    log_file.flush()
 
 def rpc_exec(*args):
     try:
@@ -127,6 +129,10 @@ class Widget(object):
         self.readonly=False
         self.invisible=False
         self.states=None
+        self.parent=None
+        self.window=None
+        self.win_x=None
+        self.win_y=None
         self.listeners={
             "keypress": [],
             "unfocus": [],
@@ -148,8 +154,10 @@ class Widget(object):
         for k,v in attrs.items():
             if k in ("string","name","on_change","domain","context","type","widget","sum","icon","default_get","colors","color","password","editable"):
                 val=v
-            elif k in ("colspan","col"):
+            elif k in ("colspan","col","size"):
                 val=int(v)
+            elif k in ("align",):
+                val=float(v)
             elif k in ("readonly","select","required","nolabel","invisible"):
                 val=eval(v) and True or False
             elif k in ("states","mode","view_mode"):
@@ -198,7 +206,7 @@ class Widget(object):
         for name in dir(self):
             if name.startswith("_"):
                 continue
-            if not name in ("x","y","maxw","maxh","h","w","string","col","colspan","value","can_focus","has_focus","borders","padding","seps"):
+            if not name in ("x","y","maxw","maxh","h","w","string","col","colspan","value","can_focus","has_focus","borders","padding","seps","readonly","invisible"):
                 continue
             val=getattr(self,name)
             if callable(val):
@@ -206,10 +214,10 @@ class Widget(object):
             s+=" %s=%s"%(name,str(val))
         return s
 
-    def draw(self,win):
+    def draw(self):
         raise Exception("method not implemented")
 
-    def refresh(self,win):
+    def refresh(self):
         pass
 
     def get_tabindex(self):
@@ -239,11 +247,11 @@ class Widget(object):
             return self
         return None
 
-    def set_cursor(self):
-        screen.move(self.y,self.x)
-
     def get_focus(self):
         return self.has_focus and self or None
+
+    def set_cursor(self):
+        screen.move(self.win_y+self.y,self.win_x+self.x)
 
 class Panel(Widget):
     def __init__(self):
@@ -251,6 +259,7 @@ class Panel(Widget):
         self._childs=[]
 
     def add(self,wg):
+        wg.parent=self
         self._childs.append(wg)
 
     def to_s(self,d=0):
@@ -273,13 +282,13 @@ class Panel(Widget):
         self.x=x
         self._compute_pass2()
 
-    def draw(self,win):
+    def draw(self):
         for c in self._vis_childs():
-            c.draw(win)
+            c.draw()
 
-    def refresh(self,win):
+    def refresh(self):
         for c in self._vis_childs():
-            c.refresh(win)
+            c.refresh()
 
     def set_vals(self,vals):
         super(Panel,self).set_vals(vals)
@@ -331,7 +340,6 @@ class Panel(Widget):
 class ScrollPanel(Panel):
     def __init__(self):
         super(ScrollPanel,self).__init__()
-        self.pad=None
         self.y0=0
 
     def _compute_pass1(self):
@@ -354,38 +362,47 @@ class ScrollPanel(Panel):
             wg.x=0
             wg.w=w
             wg.h=h
+            wg.window=curses.newpad(wg.h+10,wg.w+10) #XXX
+            wg.win_y=self.win_y+self.y+self.borders[0]
+            wg.win_x=self.win_x+self.x+self.borders[3]
             wg._compute_pass2()
 
-    def draw(self,win):
-        wg=self._childs[0]
-        if not self.pad:
-            #self.pad=curses.newpad(wg.h,wg.w)
-            self.pad=curses.newpad(wg.h+10,wg.w+10) #XXX
-        self.pad.clear()
-        wg.draw(self.pad)
+    def draw(self):
+        win=self.window
+        for wg in self._childs:
+            wg.window.clear()
+            wg.draw()
         if self.borders[0]:
             curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
-        win.vline(self.y,self.x+self.w-1,curses.ACS_BLOCK,self.h)
+        win.vline(self.y,self.x+self.w-1,curses.ACS_VLINE,self.h)
         win.vline(self.y,self.x+self.w-1,curses.ACS_CKBOARD,3)
 
-    def refresh(self,win):
-        self.pad.refresh(self.y0,0,self.y+self.borders[0],self.x+self.borders[3],self.y+self.h-1-self.borders[2],self.x+self.w-1-self.borders[1]-1)
+    def refresh(self):
         wg=self._childs[0]
-        wg.refresh(self.pad)
+        wg.window.refresh(self.y0,0,self.y+self.borders[0],self.x+self.borders[3],self.y+self.h-1-self.borders[2],self.x+self.w-1-self.borders[1]-1)
+        wg.refresh()
 
 class DeckPanel(Panel):
     def on_keypress(self,k,source):
         if k==curses.KEY_RIGHT:
             if source==self:
-                i=self._childs.index(self.cur_wg)
-                i=(i+1)%len(self._childs)
-                self.cur_wg=self._childs[i]
+                chs=[wg for wg in self._vis_childs()]
+                i=chs.index(self.cur_wg)
+                i=(i+1)%len(chs)
+                self.cur_wg=chs[i]
+                root_panel.compute()
+                root_panel.draw()
+                root_panel.refresh()
                 root_panel.set_cursor()
         elif k==curses.KEY_LEFT:
             if source==self:
-                i=self._childs.index(self.cur_wg)
-                i=(i-1)%len(self._childs)
-                self.cur_wg=self._childs[i]
+                chs=[wg for wg in self._vis_childs()]
+                i=chs.index(self.cur_wg)
+                i=(i-1)%len(chs)
+                self.cur_wg=chs[i]
+                root_panel.compute()
+                root_panel.draw()
+                root_panel.refresh()
                 root_panel.set_cursor()
 
     def __init__(self):
@@ -443,19 +460,23 @@ class DeckPanel(Panel):
                 wg.h=min(h,wg.maxh)
             wg.y=self.y+self.borders[0]+self.padding[0]
             wg.x=self.x+self.borders[3]+self.padding[3]
+            wg.window=self.window
+            wg.win_y=self.win_y
+            wg.win_x=self.win_x
         for wg in self._vis_childs():
             if hasattr(wg,"_compute_pass2"):
                 wg._compute_pass2()
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         if self.borders[0]:
             curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
         if self.cur_wg:
-            self.cur_wg.draw(win)
+            self.cur_wg.draw()
 
-    def refresh(self,win):
+    def refresh(self):
         if self.cur_wg:
-            self.cur_wg.refresh(win)
+            self.cur_wg.refresh()
 
     def set_focus(self):
         wg_f=Widget.set_focus(self)
@@ -480,6 +501,7 @@ class TabPanel(DeckPanel):
             if k==ord('c'):
                 if source==self:
                     self.remove(self.cur_wg)
+                    root_panel.draw()
                     root_panel.set_cursor()
         self.add_event_listener("keypress",on_keypress)
 
@@ -494,7 +516,8 @@ class TabPanel(DeckPanel):
         super(TabPanel,self)._compute_pass2()
         self.compute_tabs()
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         i=0
         for wg in self._childs:
             x=self.tab_x[i]
@@ -504,14 +527,14 @@ class TabPanel(DeckPanel):
             else:
                 win.addstr(self.y,x,s)
             i+=1
-        super(TabPanel,self).draw(win)
+        super(TabPanel,self).draw()
 
     def set_cursor(self):
         if not self.cur_wg:
             return
         i=self._childs.index(self.cur_wg)
         x=self.tab_x[i]
-        screen.move(self.y,x)
+        screen.move(self.win_y+self.y,self.win_x+x)
 
 class Notebook(DeckPanel):
     def __init__(self):
@@ -523,7 +546,7 @@ class Notebook(DeckPanel):
     def compute_tabs(self):
         x=self.x+3
         self.tab_x=[]
-        for wg in self._childs:
+        for wg in self._vis_childs():
             self.tab_x.append(x)
             x+=len(wg.string)+3
 
@@ -531,11 +554,14 @@ class Notebook(DeckPanel):
         super(Notebook,self)._compute_pass2()
         self.compute_tabs()
 
-    def draw(self,win):
-        super(Notebook,self).draw(win)
+    def draw(self):
+        win=self.window
+        super(Notebook,self).draw()
         i=0
-        for wg in self._childs:
+        for wg in self._vis_childs():
             x=self.tab_x[i]
+            if x+len(wg.string)+1>=80:
+                continue
             if i==0:
                 win.addch(self.y,x-2,curses.ACS_RTEE)
             else:
@@ -552,9 +578,10 @@ class Notebook(DeckPanel):
     def set_cursor(self):
         if not self.cur_wg:
             return
-        i=self._childs.index(self.cur_wg)
+        chs=[wg for wg in self._vis_childs()]
+        i=chs.index(self.cur_wg)
         x=self.tab_x[i]
-        screen.move(self.y,x)
+        screen.move(self.win_y+self.y,self.win_x+x)
 
 class Table(Panel):
     def __init__(self):
@@ -576,6 +603,7 @@ class Table(Panel):
             self._next_cx=0
         wg.cy=self._next_cy
         wg.cx=self._next_cx
+        wg.parent=self
         self._childs.append(wg)
         self._next_cx+=wg.colspan
         self.num_rows=wg.cy+1
@@ -649,8 +677,6 @@ class Table(Panel):
         return sum([self._get_sep_size(type,i) for i in range(n)])
 
     def _compute_pass1(self):
-        if not self._childs:
-            return
         for widget in self._vis_childs():
             if hasattr(widget,"_compute_pass1"):
                 widget._compute_pass1()
@@ -809,11 +835,15 @@ class Table(Panel):
                 wg.x=self.x+self.borders[3]+w_left[wg.cx+wg.colspan]-wg.w
             else:
                 raise Exception("invalid halign: %s"%wg.valign)
+            wg.window=self.window
+            wg.win_y=self.win_y
+            wg.win_x=self.win_x
         for child in self._vis_childs():
             if hasattr(child,"_compute_pass2"):
                 child._compute_pass2()
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         # draw borders
         if self.borders[0]:
             curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
@@ -842,7 +872,7 @@ class Table(Panel):
                         x=x0+self.w_left[j]
                         win.addch(y,x+1,curses.ACS_PLUS)
         # draw cell contents
-        super(Table,self).draw(win)
+        super(Table,self).draw()
 
 class Form(Table):
     def __init__(self):
@@ -877,7 +907,7 @@ class Form(Table):
         res=rpc_exec(self.model,func,ids,*args)
         value=res["value"]
         for k,v in value.items():
-            self.set_val(k,v,apply_on_change=False)
+            self.set_val(k,v)
 
     def get_val(self,name):
         if name=="parent":
@@ -892,14 +922,21 @@ class Form(Table):
         else:
             return self.input_wg[name].get_val()
 
-    def set_val(self,name,val,apply_on_change=True):
-        return self.input_wg[name].set_val(val,apply_on_change)
+    def set_val(self,name,val):
+        return self.input_wg[name].set_val(val)
 
     def get_vals(self):
         vals={}
         for name in self.input_wg:
             vals[name]=self.get_val(name)
         return vals
+
+    def set_vals(self,vals):
+        super(Form,self).set_vals(vals)
+        for name in vals:
+            wg=self.input_wg.get(name)
+            if wg:
+                wg.apply_on_change()
 
 class Group(Table):
     def __init__(self):
@@ -1020,10 +1057,11 @@ class ListView(Table):
             self.delete_line(line_no)
 
     def set_cursor(self):
-        screen.move(self.y+self.borders[0]+(self.has_header and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
+        screen.move(self.win_y+self.y+self.borders[0]+(self.has_header and 1+self.seps[0][0][0] or 0),self.win_x+self.x+self.borders[3])
 
-    def draw(self,win):
-        super(ListView,self).draw(win)
+    def draw(self):
+        win=self.window
+        super(ListView,self).draw()
         x=self.x+self.borders[3]
         w=self.w-self.borders[1]-self.borders[3]
         for sel in self.selected:
@@ -1119,7 +1157,8 @@ class Label(Widget):
     def _compute_pass1(self):
         self.maxw=len(self.string)
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         s=self.string[:self.w]
         win.addstr(self.y,self.x,s)
 
@@ -1130,7 +1169,8 @@ class Separator(Widget):
         self.maxh=1
         self.maxw=-1
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         s="_"
         if self.string:
             s+=self.string[:self.w-1]
@@ -1156,12 +1196,13 @@ class Button(Widget):
     def _compute_pass1(self):
         self.maxw=len(self.string)+2
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         s="["+self.string[:self.w-2]+"]"
         win.addstr(self.y,self.x,s)
 
     def set_cursor(self):
-        screen.move(self.y,self.x+1)
+        screen.move(self.win_y+self.y,self.win_x+self.x+1)
 
 class FormButton(Button):
     def on_push(self,arg,source):
@@ -1186,7 +1227,8 @@ class FieldLabel(Widget):
     def _compute_pass1(self):
         self.maxw=len(self.string)+1
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         s=self.string[:self.w-1]
         s+=":"
         win.addstr(self.y,self.x,s)
@@ -1207,13 +1249,13 @@ class Input(Widget):
     def get_val(self):
         return self.value
 
-    def set_val(self,val,apply_on_change=True):
-        if val!=self.value:
-            self.value=val
-            if apply_on_change:
-                on_change=getattr(self,"on_change",None)
-                if on_change:
-                    self.form_wg.apply_on_change(on_change)
+    def set_val(self,val):
+        self.value=val
+
+    def apply_on_change(self):
+        on_change=getattr(self,"on_change",None)
+        if on_change:
+            self.form_wg.apply_on_change(on_change)
 
 class StringInput(Input):
     def on_keypress(self,k,source):
@@ -1229,13 +1271,13 @@ class StringInput(Input):
             self.cur_pos=max(self.cur_pos-1,0)
             if self.cur_pos<self.cur_origin:
                 self.cur_origin=self.cur_pos
-                self.draw(screen)
+                self.draw()
             self.set_cursor()
         elif k==curses.KEY_RIGHT:
             self.cur_pos=min(self.cur_pos+1,len(self.str_val))
             if self.cur_pos-self.cur_origin>self.w-1:
                 self.cur_origin=self.cur_pos-self.w+1
-                self.draw(screen)
+                self.draw()
             self.set_cursor()
         elif k==263:
             if self.cur_pos>=1:
@@ -1254,7 +1296,8 @@ class StringInput(Input):
                     self.process_event("edit",new_str,self)
 
     def on_edit(self,string,source):
-        self.draw(screen)
+        self.draw()
+        self.to_screen()
         self.set_cursor()
 
     def __init__(self):
@@ -1267,22 +1310,33 @@ class StringInput(Input):
         self.str_val=""
         self.maxh=1
 
+    def __setattr__(self,name,value):
+        super(StringInput,self).__setattr__(name,value)
+        if name=="readonly":
+            super(StringInput,self).__setattr__("can_focus",not value)
+
     def is_valid(self,string):
         return True
 
     def set_cursor(self):
-        screen.move(self.y,self.x+self.cur_pos-self.cur_origin)
+        screen.move(self.win_y+self.y,self.win_x+self.x+self.cur_pos-self.cur_origin)
 
-    def set_val(self,val,apply_on_change=True):
-        super(StringInput,self).set_val(val,apply_on_change)
+    def set_val(self,val):
+        super(StringInput,self).set_val(val)
         self.str_val=self.val_to_str(self.value)
         self.cur_pos=0
         self.cur_origin=0
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         s=self.str_val[self.cur_origin:self.cur_origin+self.w]
+        s=s.encode('ascii','replace')
         s+="_"*(self.w-len(s))
         win.addstr(self.y,self.x,s)
+
+    def to_screen(self):
+        win=self.window
+        win.refresh(self.y,self.x,self.win_y+self.y,self.win_x+self.x,self.win_y+self.y,self.win_x+self.x+self.w)
 
     def _compute_pass1(self):
         if self.readonly:
@@ -1381,6 +1435,15 @@ class InputBoolean(StringInput):
         return True
 
 class InputDate(StringInput):
+    def on_keypress(self,k,source):
+        super(InputDate,self).on_keypress(k,source)
+        if k==ord("\n"):
+            if not self.str_val:
+                self.set_val(time.strftime("%Y-%m-%d"))
+                self.draw()
+                self.to_screen()
+                self.set_cursor()
+
     def val_to_str(self,val):
         if val is False:
             return ""
@@ -1416,11 +1479,11 @@ class InputM2O(StringInput):
             self.set_val(False)
         super(InputM2O,self).on_edit(string,source)
 
-    def set_val(self,val,apply_on_change=True):
+    def set_val(self,val):
         if type(val)==type(1):
             res=rpc_exec(self.relation,"name_get",[val])
             val=res[0]
-        super(InputM2O,self).set_val(val,apply_on_change)
+        super(InputM2O,self).set_val(val)
 
     def get_val(self):
         if self.value is False:
@@ -1434,7 +1497,7 @@ class InputM2O(StringInput):
 
     def on_unfocus(self,arg,source):
         self.set_val(self.value)
-        self.draw(screen)
+        self.draw()
         self.set_cursor()
 
 class InputText(Input):
@@ -1443,11 +1506,14 @@ class InputText(Input):
         self.maxh=7
         self.maxw=-1
 
-    def draw(self,win):
+    def draw(self):
+        win=self.window
         curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
 
     def set_cursor(self):
-        screen.move(self.y+1,self.x+1)
+        screen.move(self.win_y+self.y+1,self.win_x+self.x+1)
+
+# TODO: -> ObjBrowser
 
 class ObjTree(HorizontalPanel):
     def __init__(self):
@@ -1481,6 +1547,7 @@ class ObjTree(HorizontalPanel):
             root_panel.refresh()
             root_panel.clear_focus()
             self.tree.set_focus()
+            root_panel.set_cursor()
         self.root_list.add_event_listener("select",on_select)
 
     def parse_tree(self,el,fields):
@@ -1580,6 +1647,32 @@ class ObjList(DeckPanel):
                 i=(i-1)%len(self.commands)
                 self.cur_cmd=self.commands[i]
                 root_panel.set_cursor()
+        elif k==ord('\n'):
+            if source==self:
+                if self.cur_cmd=="N":
+                    self.cur_mode="form"
+                    self.load_view()
+                    self.active_id=None
+                    self.load_data()
+                    self.cur_wg=self.form_mode
+                    root_panel.compute()
+                    root_panel.draw()
+                    root_panel.refresh()
+                    root_panel.clear_focus()
+                    self.form_mode.set_focus()
+                    root_panel.set_cursor()
+                elif self.cur_cmd=="S":
+                    pass
+                elif self.cur_cmd=="D":
+                    pass
+                elif self.cur_cmd=="<":
+                    pass
+                elif self.cur_cmd==">":
+                    pass
+                elif self.cur_cmd=="L":
+                    pass
+                elif self.cur_cmd=="F":
+                    pass
 
     def __init__(self):
         super(ObjList,self).__init__()
@@ -1600,22 +1693,24 @@ class ObjList(DeckPanel):
         self.can_focus=True
 
     def load_view(self):
-        if self.cur_mode=="tree" and not self.tree_mode:
-            self.tree_mode=TreeMode()
-            self.tree_mode.list_wg=self
-            self.add(self.tree_mode)
-            self.tree_mode.model=self.model
-            self.tree_mode.context=self.context
-            self.tree_mode.maxh=-1
-            self.tree_mode.load_view(self.view.get("tree"))
-        elif self.cur_mode=="form" and not self.form_mode:
-            self.form_mode=FormMode()
-            self.form_mode.list_wg=self
-            self.add(self.form_mode)
-            self.form_mode.model=self.model
-            self.form_mode.context=self.context
-            self.form_mode.maxh=-1
-            self.form_mode.load_view(self.view.get("form"))
+        if self.cur_mode=="tree":
+            if not self.tree_mode:
+                self.tree_mode=TreeMode()
+                self.tree_mode.list_wg=self
+                self.add(self.tree_mode)
+                self.tree_mode.model=self.model
+                self.tree_mode.context=self.context
+                self.tree_mode.maxh=-1
+                self.tree_mode.load_view(self.view.get("tree"))
+        elif self.cur_mode=="form":
+            if not self.form_mode:
+                self.form_mode=FormMode()
+                self.form_mode.list_wg=self
+                self.add(self.form_mode)
+                self.form_mode.model=self.model
+                self.form_mode.context=self.context
+                self.form_mode.maxh=-1
+                self.form_mode.load_view(self.view.get("form"))
         else:
             raise Exception("unsupported view mode: %s"%self.cur_mode)
 
@@ -1626,8 +1721,9 @@ class ObjList(DeckPanel):
         elif self.cur_mode=="form":
             self.form_mode.load_data()
 
-    def draw(self,win):
-        super(ObjList,self).draw(win)
+    def draw(self):
+        win=self.window
+        super(ObjList,self).draw()
         if self.commands:
             s=" ".join(self.commands)
             x=self.x+self.w-len(s)-3
@@ -1640,7 +1736,7 @@ class ObjList(DeckPanel):
     def set_cursor(self):
         i=self.commands.index(self.cur_cmd)
         x=self.x+self.w-len(self.commands)*2-1+i*2
-        screen.move(self.y,x)
+        screen.move(self.win_y+self.y,self.win_x+x)
 
 class TreeMode(VerticalPanel):
     def __init__(self):
@@ -1689,6 +1785,8 @@ class TreeMode(VerticalPanel):
                             wg.selection=field["selection"]
                         elif field["type"]=="many2one":
                             wg=InputM2O()
+                        elif field["type"]=="many2many":
+                            wg=InputM2M_list()
                         else:
                             raise Exception("invalid field type: %s"%field["type"])
                         wg.readonly=True
@@ -1733,7 +1831,7 @@ class TreeMode(VerticalPanel):
         self.tree.add_event_listener("select",on_select)
 
     def load_data(self):
-        self.objs=rpc_exec(self.model,"read",self.list_wg.obj_ids,self.view["fields"].keys(),self.eval_context() or {})
+        self.objs=rpc_exec(self.model,"read",self.list_wg.obj_ids,self.view["fields"].keys(),self.context or {})
         self.tree.set_vals(self.objs)
 
     def eval_context(self):
@@ -1915,7 +2013,7 @@ class FormMode(ScrollPanel):
 
     def load_data(self):
         if self.list_wg.active_id:
-            self.obj=rpc_exec(self.model,"read",[self.list_wg.active_id],self.view["fields"].keys(),self.eval_context() or {})[0]
+            self.obj=rpc_exec(self.model,"read",[self.list_wg.active_id],self.view["fields"].keys(),self.context or {})[0]
         else:
             self.obj=rpc_exec(self.model,"default_get",self.view["fields"].keys(),self.context or {})
             for name,val in self.obj.items():
@@ -1986,8 +2084,9 @@ class InputO2M(ObjList,Input):
                 val.append((1,id,obj))
         return val
 
-    def draw(self,win):
-        super(InputO2M,self).draw(win)
+    def draw(self):
+        win=self.window
+        super(InputO2M,self).draw()
         x=self.x+1
         win.addch(self.y,x,curses.ACS_RTEE)
         x+=1
@@ -2013,8 +2112,8 @@ class InputM2M(ObjList,Input):
         if self.name in vals:
             self.set_val(vals[self.name])
 
-    def set_val(self,val,apply_on_change=True):
-        super(InputM2M,self).set_val(val,apply_on_change)
+    def set_val(self,val):
+        super(InputM2M,self).set_val(val)
         self.obj_ids=self.value
         self.load_data()
 
@@ -2026,6 +2125,26 @@ class InputM2M(ObjList,Input):
     def load_view(self):
         super(InputM2M,self).load_view()
         self.tree_mode.tree.seps=[[(0,False)],[(1,True)]]
+
+class InputM2M_list(StringInput):
+    def on_keypress(self,k,source):
+        super(InputM2M_list,self).on_keypress(k,source)
+        if k==ord("\n"):
+            wg=SearchPopup()
+            wg.model=self.relation
+            wg.target_wg=self
+            wg.show(self.str_val)
+
+    def val_to_str(self,val):
+        if val is False:
+            return ""
+        return "(%d)"%len(val)
+
+    def _compute_pass1(self):
+        if self.readonly:
+            self.maxw=len(self.str_val)
+        else:
+            self.maxw=-1
 
 class SelectBox(ListView):
     def on_select(self,line_no):
@@ -2045,7 +2164,7 @@ class SelectBox(ListView):
         self.y=y
         self.x=x
         self._compute_pass2()
-        self.draw(screen)
+        self.draw()
         screen.refresh()
         self.set_focus()
 
@@ -2083,21 +2202,27 @@ class SearchPopup(Table):
     def show(self,query):
         self.obj_list.model=self.model
         self.obj_list.load_view()
-        self.obj_list.tree.listeners["select"]=[]
+        self.obj_list.tree_mode.tree.listeners["select"]=[]
         def on_select(line_no,source):
-            obj=self.obj_list.objs[line_no]
+            obj=self.obj_list.tree_mode.objs[line_no]
             self.target_wg.set_val((obj["id"],obj["name"]))
             root_panel.close_popup(self)
-        self.obj_list.tree.add_event_listener("select",on_select)
-        self.title.string="Search: "+self.obj_list.tree.string
-        self.string=self.obj_list.tree.string
+            root_panel.compute()
+            root_panel.draw()
+            root_panel.refresh()
+            root_panel.clear_focus()
+            self.target_wg.set_focus()
+            self.target_wg.set_cursor()
+        self.obj_list.tree_mode.tree.add_event_listener("select",on_select)
+        self.title.string="Search: "+self.obj_list.tree_mode.tree.string
+        self.string=self.obj_list.tree_mode.tree.string
         res=rpc_exec(self.model,"name_search",query)
         if len(res)==1:
             self.target_wg.set_val(res[0])
-            self.target_wg.draw(screen)
+            self.target_wg.draw()
             self.target_wg.set_cursor()
         else:
-            self.obj_list.tree_mode.obj_ids=[r[0] for r in res]
+            self.obj_list.obj_ids=[r[0] for r in res]
             self.obj_list.load_data()
             root_panel.show_popup(self)
 
@@ -2152,16 +2277,38 @@ class StatusPanel(Table):
     def update(self):
         self.label.string="%s:%d [%s] %s"%(opts.host,opts.port,dbname,self.user)
 
-class RootPanel(VerticalPanel):
+class RootPanel(DeckPanel):
+    def on_keypress(self,k,source):
+        if k in (ord("\t"),curses.KEY_DOWN):
+            ind=self.get_tabindex()
+            i=ind.index(source)
+            i=(i+1)%len(ind)
+            log("move down",source,getattr(source,"name",""),"->",ind[i],getattr(ind[i],"name",""))
+            self.clear_focus()
+            ind[i].set_focus()
+            self.set_cursor()
+        elif k==curses.KEY_UP:
+            ind=self.get_tabindex()
+            i=ind.index(source)
+            i=(i-1)%len(ind)
+            self.clear_focus()
+            ind[i].set_focus()
+            self.set_cursor()
+
     def __init__(self):
         super(RootPanel,self).__init__()
+        self.main=VerticalPanel()
+        self.add(self.main)
         self.windows=TabPanel()
         self.windows.maxh=-1
-        self.add(self.windows)
+        self.main.add(self.windows)
         self.status=StatusPanel()
         self.status.maxh=1
-        self.add(self.status)
-        self.popups=DeckPanel()
+        self.main.add(self.status)
+        self.add_event_listener("keypress",self.on_keypress)
+        self.window=screen
+        self.win_y=0
+        self.win_x=0
 
     def new_window(self,act):
         if act["view_type"]=="tree":
@@ -2211,27 +2358,31 @@ class RootPanel(VerticalPanel):
             wg_f.set_cursor()
 
     def show_popup(self,wg):
-        self.popups.add(wg)
-        self.popups.cur_wg=wg
-        self.main.cur_wg=self.popups
+        self.add(wg)
+        self.cur_wg=wg
+        self.compute()
+        self.draw()
+        self.refresh()
+        self.clear_focus()
+        self.set_focus()
+        self.set_cursor()
 
     def close_popup(self,wg):
-        if wg!=self.popups.cur_wg:
+        if wg!=self.cur_wg:
             raise Exception("popup is not currently active")
-        self.popups._childs.pop()
-        if not self.popups._childs:
-            self.main.cur_wg=self.windows
+        self._childs.pop()
+        self.cur_wg=self._childs[-1]
 
     def compute(self):
         super(RootPanel,self).compute(24,80,0,0)
 
     def draw(self):
         screen.clear()
-        super(RootPanel,self).draw(screen)
+        super(RootPanel,self).draw()
 
     def refresh(self):
         screen.refresh()
-        super(RootPanel,self).refresh(screen)
+        super(RootPanel,self).refresh()
 
 def view_to_s(el,d=0):
     s="  "*d+el.tag
@@ -2243,7 +2394,6 @@ def view_to_s(el,d=0):
     return s
 
 def act_window(act_id,_act=None):
-    #log("act_window",act_id)
     if _act:
         act=_act
     else:
@@ -2251,7 +2401,6 @@ def act_window(act_id,_act=None):
     root_panel.new_window(act)
 
 def action(act_id,_act=None):
-    #log("action",act_id)
     if _act:
         act=_act
     else:
@@ -2271,22 +2420,10 @@ def start(stdscr):
     action(user["action_id"][0])
     while 1:
         k=screen.getch()
-        wg_f=root_panel.get_focus()
-        if not wg_f:
-            raise Exception("could not find focused widget")
-        root_panel.process_event("keypress",k,wg_f)
-        if k in (ord("\t"),curses.KEY_DOWN):
-            ind=root_panel.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i+1)%len(ind)
-            root_panel.clear_focus()
-            ind[i].set_focus()
-            root_panel.set_cursor()
-        elif k==curses.KEY_UP:
-            ind=root_panel.get_tabindex()
-            i=ind.index(wg_f)
-            i=(i-1)%len(ind)
-            root_panel.clear_focus()
-            ind[i].set_focus()
-            root_panel.set_cursor()
+        if k==ord('D'):
+            set_trace()
+        source=root_panel.get_focus()
+        if not source:
+            raise Exception("could not find key press source widget")
+        root_panel.process_event("keypress",k,source)
 curses.wrapper(start)
