@@ -1,7 +1,7 @@
-OpenERP Text Client
-===================
+TERP: Text ERP Client
+=====================
 
-Usage: openerp-text.py [options]
+Usage: terp.py [options]
 
 Options:
   -h, --help            show this help message and exit

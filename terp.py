@@ -1,7 +1,7 @@
 #!/usr/bin/python
 ##############################################################################
 #
-#    OpenERP Text Client
+#    TERP: Text ERP Client
 #    Copyright (C) 2010 by Almacom (Thailand) Ltd.
 #
 #    This program is free software: you can redistribute it and/or modify
@@ -1513,127 +1513,7 @@ class InputText(Input):
     def set_cursor(self):
         screen.move(self.win_y+self.y+1,self.win_x+self.x+1)
 
-# TODO: -> ObjBrowser
-
-class ObjTree(HorizontalPanel):
-    def __init__(self):
-        super(ObjTree,self).__init__()
-        self.model=None
-        self.domain=None
-        self.context=None
-        self.view_id=None
-        self.name=None
-        self.field_parent=None
-        self.root_list=ListView()
-        self.root_list.col=1
-        self.root_list.names=["name"]
-        self.root_list.maxh=-1
-        self.root_list.borders=[0,0,0,0]
-        self.add(self.root_list)
-        self.objs={}
-        def on_select(line_no,source):
-            self.cur_root=self.root_objs[line_no]
-            ids=self.cur_root[self.field_parent]
-            new_ids=[id for id in self.cur_root[self.field_parent] if not id in self.objs]
-            if new_ids:
-                objs=rpc_exec(self.model,"read",new_ids,self.fields.keys()+[self.field_parent])
-                for obj in objs:
-                    self.objs[obj["id"]]=obj
-            objs=[self.objs[id] for id in ids]
-            self.tree.delete_items()
-            self.tree.add_items(objs)
-            root_panel.compute()
-            root_panel.draw()
-            root_panel.refresh()
-            root_panel.clear_focus()
-            self.tree.set_focus()
-            root_panel.set_cursor()
-        self.root_list.add_event_listener("select",on_select)
-
-    def parse_tree(self,el,fields):
-        if el.tag=="tree":
-            wg=TreeView()
-            headers=[]
-            for child in el:
-                name=child.attrib["name"]
-                if child.tag=="field":
-                    field=fields[name]
-                    header=field["string"]
-                else:
-                    header=child.attrib["string"]
-                headers.append(header)
-            wg.col=len(headers)
-            wg.make_header(headers)
-            def make_line(vals):
-                line=[]
-                i=0
-                for child in el:
-                    if child.tag=="field":
-                        name=child.attrib["name"]
-                        field=fields[name]
-                        if field["type"]=="char":
-                            wg=InputChar()
-                        elif field["type"]=="integer":
-                            wg=InputInteger()
-                        elif field["type"]=="float":
-                            wg=InputFloat()
-                        elif field["type"]=="boolean":
-                            wg=InputBoolean()
-                        elif field["type"]=="date":
-                            wg=InputDate()
-                        elif field["type"]=="datetime":
-                            wg=InputDatetime()
-                        elif field["type"]=="text":
-                            wg=InputText()
-                        elif field["type"]=="selection":
-                            wg=InputSelect()
-                            wg.selection=field["selection"]
-                        wg.readonly=True
-                        wg.under=False
-                        wg.set_val(vals[name])
-                    elif child.tag=="button":
-                        wg=Button()
-                    if i==0:
-                        wg.can_focus=True
-                    line.append(wg)
-                    i+=1
-                return line
-            wg.make_line=make_line
-            return wg
-
-    def load_view(self):
-        self.view=rpc_exec(self.model,"fields_view_get",self.view_id,"tree",self.context)
-        self.field_parent=self.view["field_parent"]
-        self.fields=self.view["fields"]
-        self.arch=xml.etree.ElementTree.fromstring(self.view["arch"])
-        self.tree=self.parse_tree(self.arch,self.fields)
-        self.tree.field_parent=self.field_parent
-        self.tree.maxh=-1
-        self.tree.maxw=-1
-        self.tree.borders=[0,0,0,0]
-        self.tree.seps=[[(1,True),(0,False)],[(1,True)]]
-        self.add(self.tree)
-        def on_open(item,source):
-            ids=[id for id in item[self.field_parent] if not id in self.tree.items]
-            if ids:
-                objs=rpc_exec(self.model,"read",item[self.field_parent],self.fields.keys()+[self.field_parent])
-                self.tree.add_items(objs)
-        self.tree.add_event_listener("open",on_open)
-        def on_select(line_no,source):
-            obj=self.tree.lines[line_no]
-            res=rpc_exec("ir.values","get","action","tree_but_open",[(self.model,obj["id"])])
-            if res:
-                act=res[0][2]
-                action(act["id"],_act=act)
-        self.tree.add_event_listener("select",on_select)
-
-    def load_data(self):
-        self.root_ids=rpc_exec(self.model,"search",self.domain)
-        self.root_objs=rpc_exec(self.model,"read",self.root_ids,["name",self.field_parent])
-        self.root_list.add_lines(self.root_objs)
-        self.root_list.on_select(0)
-
-class ObjList(DeckPanel):
+class ObjBrowser(DeckPanel):
     def on_keypress(self,k,source):
         if k==curses.KEY_RIGHT:
             if source==self:
@@ -1662,7 +1542,13 @@ class ObjList(DeckPanel):
                     self.form_mode.set_focus()
                     root_panel.set_cursor()
                 elif self.cur_cmd=="S":
-                    pass
+                    vals=self.form.get_vals()
+                    if not self.active_id:
+                        self.active_id=rpc_exec(self.model,"create",vals)
+                    else:
+                        rpc_exec(self.model,"write",self.active_id,vals)
+                    self.load_data()
+                    root_panel.set_cursor()
                 elif self.cur_cmd=="D":
                     pass
                 elif self.cur_cmd=="<":
@@ -1681,6 +1567,7 @@ class ObjList(DeckPanel):
         self.context=None
         self.modes=None
         self.string=None
+        self.type=None
         self.cur_mode=None
         self.view={}
         self.fields={}
@@ -1738,10 +1625,35 @@ class ObjList(DeckPanel):
         x=self.x+self.w-len(self.commands)*2-1+i*2
         screen.move(self.win_y+self.y,self.win_x+x)
 
-class TreeMode(VerticalPanel):
+class TreeMode(HorizontalPanel):
     def __init__(self):
         super(TreeMode,self).__init__()
         self.tree=None
+        self.field_parent=None
+        self.root_list=ListView()
+        self.root_list.col=1
+        self.root_list.names=["name"]
+        self.root_list.maxh=-1
+        self.root_list.borders=[0,0,0,0]
+        self.add(self.root_list)
+        def on_select(line_no,source):
+            self.cur_root=self.root_objs[line_no]
+            ids=self.cur_root[self.field_parent]
+            new_ids=[id for id in self.cur_root[self.field_parent] if not id in self.objs]
+            if new_ids:
+                objs=rpc_exec(self.model,"read",new_ids,self.fields.keys()+[self.field_parent])
+                for obj in objs:
+                    self.objs[obj["id"]]=obj
+            objs=[self.objs[id] for id in ids]
+            self.tree.delete_items()
+            self.tree.add_items(objs)
+            root_panel.compute()
+            root_panel.draw()
+            root_panel.refresh()
+            root_panel.clear_focus()
+            self.tree.set_focus()
+            root_panel.set_cursor()
+        self.root_list.add_event_listener("select",on_select)
 
     def parse_tree(self,el,fields):
         if el.tag=="tree":
@@ -1830,9 +1742,41 @@ class TreeMode(VerticalPanel):
             root_panel.set_cursor()
         self.tree.add_event_listener("select",on_select)
 
+        # XXX Tree
+        self.view=rpc_exec(self.model,"fields_view_get",self.view_id,"tree",self.context)
+        self.field_parent=self.view["field_parent"]
+        self.fields=self.view["fields"]
+        self.arch=xml.etree.ElementTree.fromstring(self.view["arch"])
+        self.tree=self.parse_tree(self.arch,self.fields)
+        self.tree.field_parent=self.field_parent
+        self.tree.maxh=-1
+        self.tree.maxw=-1
+        self.tree.borders=[0,0,0,0]
+        self.tree.seps=[[(1,True),(0,False)],[(1,True)]]
+        self.add(self.tree)
+        def on_open(item,source):
+            ids=[id for id in item[self.field_parent] if not id in self.tree.items]
+            if ids:
+                objs=rpc_exec(self.model,"read",item[self.field_parent],self.fields.keys()+[self.field_parent])
+                self.tree.add_items(objs)
+        self.tree.add_event_listener("open",on_open)
+        def on_select(line_no,source):
+            obj=self.tree.lines[line_no]
+            res=rpc_exec("ir.values","get","action","tree_but_open",[(self.model,obj["id"])])
+            if res:
+                act=res[0][2]
+                action(act["id"],_act=act)
+        self.tree.add_event_listener("select",on_select)
+
     def load_data(self):
         self.objs=rpc_exec(self.model,"read",self.list_wg.obj_ids,self.view["fields"].keys(),self.context or {})
         self.tree.set_vals(self.objs)
+
+        # XXX tree
+        self.root_ids=rpc_exec(self.model,"search",self.domain)
+        self.root_objs=rpc_exec(self.model,"read",self.root_ids,["name",self.field_parent])
+        self.root_list.add_lines(self.root_objs)
+        self.root_list.on_select(0)
 
     def eval_context(self):
         if not self.context:
@@ -2029,28 +1973,6 @@ class FormMode(ScrollPanel):
         if not self.context:
             return {}
         return eval(self.context)
-
-class TreeWindow(ObjTree):
-    def __init__(self):
-        super(TreeWindow,self).__init__()
-        self.name=None
-
-class ListWindow(ObjList):
-    def on_keypress(self,k,source):
-        super(ListWindow,self).on_keypress(k,source)
-        if source==self and k==ord("\n"):
-            if self.cur_cmd=="S":
-                vals=self.form.get_vals()
-                if not self.active_id:
-                    self.active_id=rpc_exec(self.model,"create",vals)
-                else:
-                    rpc_exec(self.model,"write",self.active_id,vals)
-                self.load_data()
-                root_panel.set_cursor()
-
-    def __init__(self):
-        super(ListWindow,self).__init__()
-        self.name=None
 
 class InputO2M(ObjList,Input):
     def on_keypress(self,k,source):
@@ -2312,7 +2234,8 @@ class RootPanel(DeckPanel):
 
     def new_window(self,act):
         if act["view_type"]=="tree":
-            win=TreeWindow()
+            win=ObjBrowser()
+            win.type="tree"
             win.model=act["res_model"]
             win.domain=act["domain"] and eval(act["domain"]) or []
             win.context=act["context"] and eval(act["context"]) or {}
@@ -2330,7 +2253,8 @@ class RootPanel(DeckPanel):
             root_panel.set_focus()
             root_panel.set_cursor()
         elif act["view_type"]=="form":
-            win=ListWindow()
+            win=ObjBrowser()
+            win.type="form"
             win.model=act["res_model"]
             domain=act["domain"] and eval(act["domain"]) or ""
             win.context=act["context"] and eval(act["context"]) or ""

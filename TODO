@@ -1,0 +1,9 @@
+- paging in list
+- search in list
+- resizable screen
+- user pref
+- localization
+- form/tree scrolling
+- no exit when error (popup)
+- multiselect for m2m
+- tryton backend support
