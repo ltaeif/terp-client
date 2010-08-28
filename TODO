@@ -6,4 +6,8 @@
 - form/tree scrolling
 - no exit when error (popup)
 - multiselect for m2m
+- toolbar
+- mouse support
+- wizards
 - tryton backend support
+- color!
