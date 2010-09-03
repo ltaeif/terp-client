@@ -105,6 +105,7 @@ class Widget(object):
         self.states_v=None
         self.attrs_v={}
         self.colspan=1
+        self.colspan_follow=0
         self.rowspan=1
         self.parent=None
         self.window=None
@@ -629,9 +630,9 @@ class Table(Panel):
         self._next_cy=0
 
     def add(self,wg):
-        if not wg.colspan or wg.colspan>self.col:
+        if not wg.colspan or wg.colspan+wg.colspan_follow>self.col:
             raise Exception("invalid colspan")
-        if self._next_cx+wg.colspan>self.col:
+        if self._next_cx+wg.colspan+wg.colspan_follow>self.col:
             self._next_cy+=1
             self._next_cx=0
         wg.cy=self._next_cy
@@ -1361,7 +1362,7 @@ class StringInput(Input):
 
 class InputChar(StringInput):
     def val_to_str(self,val):
-        return val and val or ""
+        return val and str(val) or ""
 
     def str_to_val(self,s):
         if s=="":
@@ -1531,6 +1532,15 @@ class InputM2O(StringInput):
 
     def on_unfocus(self,arg,source):
         pass
+
+class InputReference(StringInput):
+    def val_to_str(self,val):
+        if val is False:
+            return ""
+        return str(val)
+
+    def str_to_val(self,s):
+        return False
 
 class InputText(Input):
     def __init__(self):
@@ -2241,6 +2251,7 @@ class FormMode(ScrollPanel):
                 wg_l.field=field
                 wg_l.init_attrs()
                 wg_l.set_record(self.record)
+                wg_l.colspan_follow=wg_l.colspan-1
                 wg_l.colspan=1
                 panel.add(wg_l)
             if field["type"]=="char":
@@ -2272,6 +2283,8 @@ class FormMode(ScrollPanel):
                 views=field["views"]
                 wg=InputM2M(model,views=views)
                 wg.load_view()
+            elif field["type"]=="reference":
+                wg=InputReference()
             else:
                 raise Exception("unsupported field type: %s"%field["type"])
             wg.view_wg=self

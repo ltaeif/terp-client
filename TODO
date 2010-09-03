@@ -1,11 +1,9 @@
-- switch, m2m edit,list back/fwd, filter, list scroll, form scroll
+- m2m edit,ref type,list back/fwd, filter, list scroll, form scroll
 - fix: act new
+- user pref
 - tree editable
 - check required
-- paging in list
-- search in list
 - resizable screen
-- user pref
 - localization
 - form/tree scrolling
 - no exit when error (popup)
