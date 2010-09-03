@@ -274,13 +274,23 @@ class Widget(object):
             def __init__(self,wg):
                 self.__wg=wg
             def __getitem__(self,name):
-                if name=="parent":
+                if name=="True":
+                    return True
+                elif name=="False":
+                    return False
+                elif name=="parent":
                     return Env(self.__wg.view_wg.parent)
-                if name=="context":
+                elif name=="context":
                     return self.__wg.view_wg.parent.context
-                if not self.__wg.record:
+                rec=self.__wg.record
+                if not rec:
                     return None
-                return self.__wg.record.get_val(name,None)
+                if not name in rec.fields:
+                    return None
+                val=rec.get_val(name)
+                if rec.fields[name]['type']=='many2one' and val:
+                    val=val[0]
+                return val
             def __getattr__(self,name):
                 if name=="__wg":
                     return self.__dict__["__wg"]
@@ -1222,8 +1232,31 @@ class Input(Widget):
     def set_val(self,val):
         self.record.set_val(self.name,val)
 
+    def apply_on_change(self):
+        expr=self.view_attrs['on_change']
+        log('=====================')
+        log('apply_on_change',self.name,self.record.model,self.record.id,expr)
+        i=expr.find("(")
+        if i==-1:
+            raise Exception("invalid on_change expression: %s"%expr)
+        func=expr[:i].strip()
+        args_str=expr[i:]
+        args=self.eval_expr(args_str)
+        if type(args)!=type(()):
+            args=(args,)
+        ids=[self.record.id or False]
+        res=rpc_exec(self.record.model,func,ids,*args)
+        if res and "value" in res:
+            vals=res["value"]
+            log('vals',vals)
+            self.record.set_vals(vals,self.record.fields)
+
     def on_change(self):
-        pass
+        expr=self.view_attrs.get('on_change')
+        if expr and not self.record.disable_on_change:
+            self.record.disable_on_change=True
+            self.apply_on_change()
+            self.record.disable_on_change=False
 
 class StringInput(Input):
     def on_keypress(self,k,source):
@@ -1271,6 +1304,7 @@ class StringInput(Input):
         self.set_cursor()
 
     def on_change(self):
+        super(StringInput,self).on_change()
         val=self.get_val()
         self.str_val=self.val_to_str(val)
         self.cur_pos=0
@@ -1475,7 +1509,7 @@ class InputM2O(StringInput):
         self.update_can_focus=False
 
     def on_edit(self,string,source):
-        if self.value:
+        if self.get_val():
             self.set_val(False)
         super(InputM2O,self).on_edit(string,source)
 
@@ -1509,6 +1543,7 @@ class ObjRecord(object):
         self.changed=False
         self.deleted=False
         self.listeners={}
+        self.disable_on_change=False
 
     def add_event_listener(self,event,listener):
         self.listeners.setdefault(event,[]).append(listener)
@@ -1520,6 +1555,7 @@ class ObjRecord(object):
             self.listeners[event]=[]
 
     def process_event(self,event):
+        log("record event",self.model,self.id,event,":",len(self.listeners.get(event,[])),"listeners")
         for listener in self.listeners.get(event,[]):
             listener()
         return True
@@ -1529,19 +1565,28 @@ class ObjRecord(object):
 
     def set_val(self,name,val):
         field=self.fields[name]
-        if field['type']=='many2one' and type(val)==type(1):
-            name_=rpc_exec(field['relation'],'name_get',[val])[0][1]
-            val=(val,name_)
+        if field['type']=='many2one':
+            val=ObjRecord.convert_m2o(val,field['relation'])
         self.vals[name]=val
         self.changed=True
         self.record_changed([name])
 
     def set_vals(self,vals,fields):
         for name,val in vals.items():
+            field=fields[name]
+            if field['type']=='many2one':
+                val=ObjRecord.convert_m2o(val,field['relation'])
             self.vals[name]=val
-            self.fields[name]=fields[name]
+            self.fields[name]=field
         self.changed=True
         self.record_changed(vals.keys())
+
+    @staticmethod
+    def convert_m2o(val,model):
+        if type(val)==type(1):
+            name=rpc_exec(model,'name_get',[val])[0][1]
+            val=(val,name)
+        return val
 
     def read(self,fields,context=None):
         names=[name for name in fields.keys() if name not in self.vals]
@@ -1555,9 +1600,8 @@ class ObjRecord(object):
             field=fields[name]
             self.fields[name]=field
             val=res.get(name,False)
-            if field['type']=='many2one' and  type(val)==type(1):
-                name_=rpc_exec(field['relation'],'name_get',[val])[0][1]
-                val=(val,name_)
+            if field['type']=='many2one':
+                val=ObjRecord.convert_m2o(val,field['relation'])
             elif field['type']=='one2many':
                 ids=val or []
                 val=[ObjRecord(field['relation'],id) for id in ids]
@@ -1709,6 +1753,8 @@ class TreeMode(HorizontalPanel):
                 if self.cur_cmd=="N":
                     if self.parent.view_wg:
                         link=LinkPopup()
+                        link.record=self.parent.record
+                        link.view_wg=self.parent.view_wg
                         link.string=self.parent.field["string"]
                         link.form_mode.view=self.parent.field["views"].get("form")
                         link.form_mode.record=ObjRecord(self.parent.model)
@@ -1725,7 +1771,18 @@ class TreeMode(HorizontalPanel):
                         link.on_close=on_close
                         link.show()
                     else:
-                        pass
+                        rec=ObjRecord(self.parent.model)
+                        self.parent.cur_mode="form"
+                        self.parent.mode_wg['form'].record=rec
+                        self.parent.load_view()
+                        self.parent.read()
+                        self.parent.cur_wg=self.parent.mode_wg["form"]
+                        root_panel.compute()
+                        root_panel.draw()
+                        root_panel.refresh()
+                        root_panel.clear_focus()
+                        root_panel.set_focus()
+                        root_panel.set_cursor()
                 elif self.cur_cmd=="S":
                     ObjRecord.save(self.parent.records)
                     ObjRecord.clear_list(self.parent.records)
@@ -2143,8 +2200,8 @@ class FormMode(ScrollPanel):
             if not el.attrib.get("nolabel"):
                 wg_l=FieldLabel()
                 wg_l.view_wg=self
-                wg_l.field=field
                 wg_l.view_attrs=el.attrib
+                wg_l.field=field
                 wg_l.init_attrs()
                 wg_l.set_record(self.record)
                 wg_l.colspan=1
@@ -2409,6 +2466,9 @@ class LinkPopup(Table):
         btn_ok.string="OK"
         btn_ok.add_event_listener("push",self.on_ok)
         buttons.add(btn_ok)
+        self.context={}
+        self.record=None
+        self.view_wg=None
 
     def show(self):
         self.form_mode.load_view()
@@ -2550,10 +2610,9 @@ class RootPanel(DeckPanel):
         self.set_cursor()
 
     def close_popup(self,wg):
-        if wg!=self.cur_wg:
-            raise Exception("popup is not currently active")
-        self._childs.pop()
-        self.cur_wg=self._childs[-1]
+        if wg==self.cur_wg:
+            self._childs.pop()
+            self.cur_wg=self._childs[-1]
         self.compute()
         self.draw()
         self.refresh()

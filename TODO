@@ -1,4 +1,4 @@
-- new, onchange, switch, filter, list scroll, form scroll
+- onchange, switch, list back/fwd, filter, list scroll, form scroll
 - tree editable
 - check required
 - paging in list
@@ -14,3 +14,4 @@
 - wizards
 - tryton backend support
 - color!
+- web demo using shellinabox
