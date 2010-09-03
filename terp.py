@@ -132,7 +132,7 @@ class Widget(object):
         for name in dir(self):
             if name.startswith("_"):
                 continue
-            if not name in ("x","y","maxw","maxh","h","w","can_focus","has_focus","borders","padding","seps","string","cx","cy","colspan","col"):
+            if not name in ("x","y","maxw","maxh","h","w","can_focus","has_focus","borders","padding","seps","string","cx","cy","colspan","col","readonly","required","invisible"):
                 continue
             val=getattr(self,name)
             if callable(val):
@@ -196,52 +196,42 @@ class Widget(object):
             self.col=int(self.view_attrs["col"])
 
     def update_attrs(self):
+        new_attrs={}
         if self.field:
-            if self.update_readonly and "readonly" in self.field:
-                self.readonly=self.field["readonly"]
-            if "required" in self.field:
-                self.required=self.field["required"]
-            if "domain" in self.field:
-                self.domain=self.field["domain"]
+            for attr in ("readonly","required","domain"):
+                if attr in self.field:
+                    new_attrs[attr]=self.field[attr]
             if "states" in self.field:
                 state=self.eval_expr("state")
                 vals=self.field["states"].get(state,[])
                 for attr,val in vals:
-                    if not attr in ("readonly","required"):
-                        continue
-                    setattr(self,attr,val)
+                    new_attrs[attr]=val
         for attr in ('readonly','required','invisible'):
             if attr in self.view_attrs:
-                if attr=="readonly" and not self.update_readonly:
-                    continue
                 res=self.eval_expr(self.view_attrs[attr])
                 if res:
-                    setattr(self,attr,True)
+                    new_attrs[attr]=True
         if "domain" in self.view_attrs:
-            self.domain+=self.eval_expr(self.view_attrs["domain"]) or []
+            new_attrs["domain"]=self.eval_expr(self.view_attrs["domain"]) or []
         if "context" in self.view_attrs:
             expr=self.view_attrs["context"]
             if expr[0]=="{":
-                self.context=self.eval_expr(expr)
+                new_attrs["context"]=self.eval_expr(expr)
             else:
                 ctx={}
                 for expr_ in expr.split(","):
                     var,val=expr_.split("=")
                     ctx[var]=self.eval_expr(val) or {}
-                self.context=ctx
+                new_attrs["context"]=ctx
         if "states" in self.view_attrs:
             states=self.view_attrs["states"].split(",")
             state=self.eval_expr("state")
             if not state in states:
-                self.invisible=1
+                new_attrs["invisible"]=1
         if "attrs" in self.view_attrs:
             if self.record:
                 attrs=self.eval_expr(self.view_attrs["attrs"])
                 for attr,dom in attrs.items():
-                    if not attr in ('readonly','required','invisible'):
-                        continue
-                    if attr=="readonly" and not self.update_readonly:
-                        continue
                     eval_dom=True
                     for (name,op,param) in dom:
                         val=self.record.get_val(name)
@@ -257,7 +247,13 @@ class Widget(object):
                             eval_dom=False
                             break
                     if eval_dom:
-                        setattr(self,attr,True)
+                        new_attrs[attr]=True
+        for attr,val in new_attrs.items():
+            if not attr in ("readonly","required","invisible","domain","context"):
+                continue
+            if attr=="readonly" and not self.update_readonly:
+                continue
+            setattr(self,attr,val)
         if self.update_can_focus:
             self.can_focus=not self.readonly
 
@@ -1069,13 +1065,14 @@ class ListView(Table):
     def draw(self):
         win=self.window
         super(ListView,self).draw()
-        x=self.x+self.borders[3]
-        w=self.w-self.borders[1]-self.borders[3]
         for line in self.lines:
             if line.selected:
                 wg=line.widgets[0]
                 y=wg.y
-                win.chgat(y,x,w,curses.A_BOLD)
+                for i in range(self.col):
+                    x0=self.x+self.borders[3]+self.w_left[i]+self._get_sep_size("x",i)
+                    x1=self.x+self.borders[3]+self.w_left[i+1]
+                    win.chgat(y,x0,x1-x0,curses.A_REVERSE)
 
     def set_lines(self,lines):
         self.delete_lines()
@@ -1588,11 +1585,18 @@ class ObjRecord(object):
         self.vals={}
         self.fields={}
 
+    @staticmethod
+    def clear_list(recs):
+        for rec in recs:
+            rec.clear()
+
     def get_op(self):
+        if self.deleted:
+            if not self.id:
+                return None
+            return (2,self.id)
         if not self.changed:
             return None
-        if self.deleted:
-            return (2,self.id)
         vals_={}
         for name,val in self.vals.items():
             field=self.fields[name]
@@ -1614,17 +1618,30 @@ class ObjRecord(object):
         else:
             return (0,0,vals_)
 
-    def save(self):
-        op=self.get_op()
-        log("SAVE",self.model,op)
-        if not op:
-            return
-        if op[0]==0:
-            self.id=rpc_exec(self.model,"create",op[2])
-        elif op[0]==1:
-            rpc_exec(self.model,"write",op[1],op[2])
-        elif op[0]==2:
-            rpc_exec(self.model,"unlink",op[1])
+    @staticmethod
+    def save(recs):
+        for rec in recs:
+            op=rec.get_op()
+            if not op:
+                continue
+            log("SAVE",rec.model,op)
+            if op[0]==0:
+                rec.id=rpc_exec(rec.model,"create",op[2])
+            elif op[0]==1:
+                rpc_exec(rec.model,"write",[op[1]],op[2])
+            elif op[0]==2:
+                rpc_exec(rec.model,"unlink",[op[1]])
+        ObjRecord.after_save(recs)
+
+    @staticmethod
+    def after_save(recs):
+        recs[:]=[rec for rec in recs if not rec.deleted]
+        for rec in recs:
+            rec.changed=False
+            for name,val in rec.vals.items():
+                field=rec.fields[name]
+                if field["type"]=="one2many":
+                    ObjRecord.after_save(val)
 
     def copy(self):
         rec=ObjRecord(self.model,self.id)
@@ -1710,14 +1727,29 @@ class TreeMode(HorizontalPanel):
                     else:
                         pass
                 elif self.cur_cmd=="S":
-                    if not self.active_id:
-                        self.active_id=rpc_exec(self.model,"create",self.obj)
-                    else:
-                        rpc_exec(self.model,"write",self.active_id,self.obj)
+                    ObjRecord.save(self.parent.records)
+                    ObjRecord.clear_list(self.parent.records)
                     self.read()
-                    root_panel.set_cursor()
+                    root_panel.compute()
+                    root_panel.draw()
+                    root_panel.refresh()
+                    self.set_cursor()
                 elif self.cur_cmd=="D":
-                    pass
+                    mb=MessageBox()
+                    mb.set_title("Confirmation")
+                    mb.set_message("Are you sure to remove these records?")
+                    mb.set_buttons(["Cancel","OK"])
+                    def on_close(string):
+                        if string=="OK":
+                            for line in self.tree.lines:
+                                if line.selected:
+                                    line.record.deleted=True
+                            if not self.parent.view_wg:
+                                ObjRecord.save(self.parent.records)
+                                ObjRecord.clear_list(self.parent.records)
+                            self.read()
+                    mb.on_close=on_close
+                    mb.show()
                 elif self.cur_cmd=="<":
                     pass
                 elif self.cur_cmd==">":
@@ -1945,7 +1977,8 @@ class TreeMode(HorizontalPanel):
         elif self.type=="form":
             ObjRecord.read_list(self.parent.model,self.parent.records,self.view['fields'])
             self.tree.delete_lines()
-            self.tree.add_records(self.parent.records)
+            recs=[rec for rec in self.parent.records if not rec.deleted]
+            self.tree.add_records(recs)
 
     def read_child_records(self,ids,context=None):
         new_ids=[id for id in ids if not id in self.rec_child_pool]
@@ -1988,7 +2021,7 @@ class FormMode(ScrollPanel):
                     self.form_mode.set_focus()
                     root_panel.set_cursor()
                 elif self.cur_cmd=="S":
-                    self.record.save()
+                    ObjRecord.save([self.record]) # XXX
                     self.record.clear()
                     self.record.read(self.view['fields'])
                     root_panel.compute()
