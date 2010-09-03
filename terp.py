@@ -306,6 +306,9 @@ class Panel(Widget):
         wg.parent=self
         self._childs.append(wg)
 
+    def remove(self,wg):
+        self._childs.remove(wg)
+
     def to_s(self,d=0):
         s=super(Panel,self).to_s(d)
         for c in self._childs:
@@ -1823,7 +1826,21 @@ class TreeMode(HorizontalPanel):
                 elif self.cur_cmd=="T":
                     pass
                 elif self.cur_cmd=="F":
-                    pass
+                    sel_lines=[line for line in self.tree.lines if line.selected]
+                    if sel_lines:
+                        line=sel_lines[0]
+                        rec=line.record
+                        self.parent.cur_mode="form"
+                        self.parent.mode_wg['form'].record=rec
+                        self.parent.load_view()
+                        self.parent.read()
+                        self.parent.cur_wg=self.parent.mode_wg["form"]
+                        root_panel.compute()
+                        root_panel.draw()
+                        root_panel.refresh()
+                        root_panel.clear_focus()
+                        root_panel.set_focus()
+                        root_panel.set_cursor()
 
     def __init__(self,type):
         super(TreeMode,self).__init__()
@@ -2122,7 +2139,16 @@ class FormMode(ScrollPanel):
                 elif self.cur_cmd==">":
                     pass
                 elif self.cur_cmd=="T":
-                    pass
+                    self.parent.cur_mode="tree"
+                    self.parent.load_view()
+                    self.parent.read()
+                    self.parent.cur_wg=self.parent.mode_wg["tree"]
+                    root_panel.compute()
+                    root_panel.draw()
+                    root_panel.refresh()
+                    root_panel.clear_focus()
+                    self.parent.cur_wg.set_focus()
+                    self.parent.cur_wg.set_cursor()
                 elif self.cur_cmd=="F":
                     pass
                 elif self.cur_cmd=="C":

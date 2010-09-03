@@ -1,4 +1,5 @@
-- onchange, switch, list back/fwd, filter, list scroll, form scroll
+- switch, m2m edit,list back/fwd, filter, list scroll, form scroll
+- fix: act new
 - tree editable
 - check required
 - paging in list
