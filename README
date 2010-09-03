@@ -5,8 +5,6 @@ TERP is a text-mode ERP client implemented in python-curses that works with
 OpenERP backends (we will also try to add Tryton backend support within the
 same client).
 
-Thanks to Almacom (Thailand) and Syleam for sponsoring this project.
-
 Usage: terp.py [options]
 
 Options:
@@ -19,3 +17,10 @@ Options:
                         user password
   --debug               debug mode
 
+Acknowledgements
+================
+
+Thanks to Almacom (Thailand) and Syleam for sponsoring this project.
+
+http://almacom.co.th/
+http://syleam.fr/
