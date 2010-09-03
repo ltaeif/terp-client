@@ -284,9 +284,9 @@ class Widget(object):
                     return self.__wg.view_wg.parent.context
                 rec=self.__wg.record
                 if not rec:
-                    return None
+                    return False
                 if not name in rec.fields:
-                    return None
+                    return False
                 val=rec.get_val(name)
                 if rec.fields[name]['type']=='many2one' and val:
                     val=val[0]
@@ -657,6 +657,8 @@ class Table(Panel):
         if pos==None:
             pos=len(self._childs)
         self._childs=self._childs[:pos]+row+self._childs[pos:]
+        for wg in row:
+            wg.parent=self
         self.num_rows+=1
 
     def delete_row(self,cy):
@@ -1249,6 +1251,12 @@ class Input(Widget):
         if res and "value" in res:
             vals=res["value"]
             log('vals',vals)
+            for name,val in vals.items():
+                field=self.record.fields[name]
+                if field['type']=='many2many':
+                    vals[name]=[ObjRecord(field['relation'],id) for id in val or []]
+                elif field['type']=='many2one':
+                    vals[name]=ObjRecord.convert_m2o(val,field['relation'])
             self.record.set_vals(vals,self.record.fields)
 
     def on_change(self):
@@ -1602,7 +1610,7 @@ class ObjRecord(object):
             val=res.get(name,False)
             if field['type']=='many2one':
                 val=ObjRecord.convert_m2o(val,field['relation'])
-            elif field['type']=='one2many':
+            elif field['type'] in ('one2many','many2many'):
                 ids=val or []
                 val=[ObjRecord(field['relation'],id) for id in ids]
             self.vals[name]=val
@@ -1647,7 +1655,8 @@ class ObjRecord(object):
             if field["type"]=="many2one":
                 val_=val and val[0] or False
             elif field["type"]=="many2many":
-                val_=[(6,0,val or [])]
+                ids=[rec.id for rec in val if not rec.deleted]
+                val_=[(6,0,ids)]
             elif field["type"]=="one2many":
                 val_=[]
                 for rec in val:
@@ -1684,7 +1693,7 @@ class ObjRecord(object):
             rec.changed=False
             for name,val in rec.vals.items():
                 field=rec.fields[name]
-                if field["type"]=="one2many":
+                if field["type"] in ("one2many","many2many"):
                     ObjRecord.after_save(val)
 
     def copy(self):
@@ -1972,6 +1981,8 @@ class TreeMode(HorizontalPanel):
                     line=self.tree.lines[line_no]
                     rec=line.record
                     link=LinkPopup()
+                    link.record=self.parent.record
+                    link.view_wg=self.parent.view_wg
                     link.string=self.parent.field["string"]
                     link.form_mode.view=self.parent.field["views"].get("form")
                     link.form_mode.record=ObjRecord(rec.model)
@@ -2289,7 +2300,6 @@ class FormMode(ScrollPanel):
             self.remove(self.form)
         self.record.remove_event_listener("change")
         self.form=self.parse(arch,self.view["fields"])
-        self.record.record_changed()
         self.add(self.form)
         self.form.maxh=-1
 
@@ -2340,6 +2350,11 @@ class InputM2M(ObjBrowser,Input):
         super(InputM2M,self).__init__(model,modes=modes,views=views)
         self.maxh=8
         self.maxw=-1
+
+    def on_change(self):
+        val=self.get_val()
+        self.records=val
+        self.read()
 
     def load_view(self):
         super(InputM2M,self).load_view()
@@ -2667,6 +2682,8 @@ def start(stdscr):
     action(user["action_id"][0])
     while 1:
         k=screen.getch()
+        if dbg_mode:
+            set_trace()
         if k==ord('D'):
             #set_trace()
             global dbg_mode
