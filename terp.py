@@ -1724,7 +1724,7 @@ class ObjRecord(object):
             self.process_event("field_change_"+name)
 
 class ObjBrowser(DeckPanel):
-    def __init__(self,model,name=None,type=None,modes=None,view_ids=None,views=None,context=None,window=False):
+    def __init__(self,model,name=None,type=None,modes=None,view_ids=None,views=None,context=None,window=False,add=False):
         super(ObjBrowser,self).__init__()
         self.model=model
         self.type=type or "form"
@@ -1743,7 +1743,7 @@ class ObjBrowser(DeckPanel):
                 continue
             self.mode_wg[mode]=wg
             self.add(wg)
-            wg.set_commands(self.type,self.modes,window=window)
+            wg.set_commands(self.type,self.modes,window=window,add=add)
             wg.maxh=-1
             if views and mode in views:
                 wg.view=views[mode]
@@ -1805,6 +1805,21 @@ class TreeMode(HorizontalPanel):
                         root_panel.clear_focus()
                         root_panel.set_focus()
                         root_panel.set_cursor()
+                elif self.cur_cmd=="A":
+                    wg=SearchPopup()
+                    wg.string=self.parent.field["string"]
+                    wg.model=self.parent.model
+                    def on_close(ids):
+                        if ids:
+                            recs=self.parent.get_val()
+                            recs+=[ObjRecord(self.parent.model,id) for id in ids]
+                            self.parent.set_val(recs)
+                        root_panel.close_popup(wg)
+                        root_panel.clear_focus()
+                        self.set_focus()
+                        self.set_cursor()
+                    wg.on_close=on_close
+                    wg.show()
                 elif self.cur_cmd=="S":
                     ObjRecord.save(self.parent.records)
                     ObjRecord.clear_list(self.parent.records)
@@ -1890,10 +1905,10 @@ class TreeMode(HorizontalPanel):
         elif type=="form":
             pass
 
-    def set_commands(self,type,modes,window):
+    def set_commands(self,type,modes,window=False,add=False):
         self.commands=[]
         if type=="form":
-            self.commands+=["N","D"]
+            self.commands+=[add and "A" or "N","D"]
             if window:
                 self.commands+=["S","R"]
             self.commands+=["<",">"]
@@ -2178,9 +2193,9 @@ class FormMode(ScrollPanel):
         self.commands=None
         self.can_focus=False
 
-    def set_commands(self,type,modes,window):
+    def set_commands(self,type,modes,window,add=False):
         self.commands=[]
-        self.commands+=["N","D"]
+        self.commands+=[add and "A" or "N","D"]
         if window:
             self.commands+=["S","R"]
         self.commands+=["<",">"]
@@ -2386,7 +2401,7 @@ class InputO2M(ObjBrowser,Input):
 
 class InputM2M(ObjBrowser,Input):
     def __init__(self,model,modes=None,views=None):
-        super(InputM2M,self).__init__(model,modes=modes,views=views)
+        super(InputM2M,self).__init__(model,modes=modes,views=views,add=True)
         self.maxh=8
         self.maxw=-1
 
