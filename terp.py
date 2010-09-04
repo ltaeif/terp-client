@@ -263,14 +263,14 @@ class Widget(object):
     def on_record_change(self):
         self.update_attrs()
 
-    def on_change(self):
+    def on_field_change(self):
         pass
 
     def set_record(self,record):
         self.record=record
         record.add_event_listener("record_change",self.on_record_change)
         if self.name:
-            record.add_event_listener("field_change_"+self.name,self.on_change)
+            record.add_event_listener("field_change_"+self.name,self.on_field_change)
 
     def eval_expr(self,expr):
         class Env(dict):
@@ -1270,8 +1270,8 @@ class Input(Widget):
             root_panel.draw()
             root_panel.refresh()
 
-    def on_change(self):
-        log('on_change',self.name,self.get_val())
+    def on_field_change(self):
+        log('on_field_change',self.name,self.get_val())
         pass
 
 class StringInput(Input):
@@ -1319,8 +1319,8 @@ class StringInput(Input):
         self.to_screen()
         self.set_cursor()
 
-    def on_change(self):
-        super(StringInput,self).on_change()
+    def on_field_change(self):
+        super(StringInput,self).on_field_change()
         val=self.get_val()
         self.str_val=self.val_to_str(val)
         self.cur_pos=0
@@ -2394,7 +2394,7 @@ class InputO2M(ObjBrowser,Input):
                 wg.target_wg=self
                 wg.show()
 
-    def on_change(self):
+    def on_field_change(self):
         val=self.get_val()
         self.records=val
         self.read()
@@ -2424,7 +2424,7 @@ class InputM2M(ObjBrowser,Input):
         self.maxh=8
         self.maxw=-1
 
-    def on_change(self):
+    def on_field_change(self):
         val=self.get_val()
         self.records=val
         self.read()
