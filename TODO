@@ -2,7 +2,6 @@
 - fix: prod form en/th
 - fix: act new
 - fix: on_change/wdg refresh
-- fix: float
 - fix: text
 - tree editable
 - check required

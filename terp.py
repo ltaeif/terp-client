@@ -1819,7 +1819,7 @@ class TreeMode(HorizontalPanel):
                         root_panel.clear_focus()
                         root_panel.set_focus()
                         root_panel.set_cursor()
-                elif self.cur_cmd=="A":
+                elif self.cur_cmd=="+":
                     wg=SearchPopup()
                     wg.string=self.parent.field["string"]
                     wg.model=self.parent.model
@@ -1858,6 +1858,14 @@ class TreeMode(HorizontalPanel):
                             self.read()
                     mb.on_close=on_close
                     mb.show()
+                elif self.cur_cmd=="-":
+                    for line in self.tree.lines:
+                        if line.selected:
+                            line.record.deleted=True
+                    self.read()
+                    root_panel.draw()
+                    root_panel.refresh()
+                    root_panel.set_cursor()
                 elif self.cur_cmd=="<":
                     pass
                 elif self.cur_cmd==">":
@@ -1922,7 +1930,7 @@ class TreeMode(HorizontalPanel):
     def set_commands(self,type,modes,window=False,add=False):
         self.commands=[]
         if type=="form":
-            self.commands+=[add and "A" or "N","D"]
+            self.commands+=[add and "+" or "N",add and "-" or "D"]
             if window:
                 self.commands+=["S","R"]
             self.commands+=["<",">"]
