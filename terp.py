@@ -28,6 +28,7 @@ import xmlrpclib
 import xml.etree.ElementTree
 import pdb
 import traceback
+import re
 
 parser=OptionParser()
 parser.add_option("-H","--host",dest="host",help="host name",metavar="HOST",default="127.0.0.1")
@@ -1240,7 +1241,9 @@ class Input(Widget):
         self.record.set_val(self.name,val)
 
     def apply_on_change(self):
-        expr=self.view_attrs['on_change']
+        expr=self.view_attrs.get('on_change')
+        if not expr:
+            return
         log('=====================')
         log('apply_on_change',self.name,self.record.model,self.record.id,expr)
         i=expr.find("(")
@@ -1252,6 +1255,7 @@ class Input(Widget):
         if type(args)!=type(()):
             args=(args,)
         ids=[self.record.id or False]
+        log('  ',func,args)
         res=rpc_exec(self.record.model,func,ids,*args)
         if res and "value" in res:
             vals=res["value"]
@@ -1263,13 +1267,12 @@ class Input(Widget):
                 elif field['type']=='many2one':
                     vals[name]=ObjRecord.convert_m2o(val,field['relation'])
             self.record.set_vals(vals,self.record.fields)
+            root_panel.draw()
+            root_panel.refresh()
 
     def on_change(self):
-        expr=self.view_attrs.get('on_change')
-        if expr and not self.record.disable_on_change:
-            self.record.disable_on_change=True
-            self.apply_on_change()
-            self.record.disable_on_change=False
+        log('on_change',self.name,self.get_val())
+        pass
 
 class StringInput(Input):
     def on_keypress(self,k,source):
@@ -1298,7 +1301,7 @@ class StringInput(Input):
         elif k==263:
             if self.cur_pos>=1:
                 new_str=self.str_val[:self.cur_pos-1]+self.str_val[self.cur_pos:]
-                if self.is_valid(new_str):
+                if not new_str or self.is_valid(new_str):
                     self.str_val=new_str
                     self.cur_pos-=1
                     if self.cur_pos<self.cur_origin:
@@ -1307,7 +1310,7 @@ class StringInput(Input):
         elif k==330:
             if self.cur_pos<=len(self.str_val)-1:
                 new_str=self.str_val[:self.cur_pos]+self.str_val[self.cur_pos+1:]
-                if self.is_valid(new_str):
+                if not new_str or self.is_valid(new_str):
                     self.str_val=new_str
                     self.process_event("edit",new_str,self)
 
@@ -1359,7 +1362,10 @@ class StringInput(Input):
     def on_unfocus(self,arg,source):
         if not self.readonly:
             val=self.str_to_val(self.str_val)
-            self.set_val(val)
+            old_val=self.get_val()
+            if val!=old_val:
+                self.set_val(val)
+                self.apply_on_change()
 
 class InputChar(StringInput):
     def val_to_str(self,val):
@@ -1515,6 +1521,7 @@ class InputM2O(StringInput):
                 if ids:
                     id=ids[0]
                     self.set_val(id)
+                    self.apply_on_change()
                 root_panel.close_popup(wg)
                 root_panel.clear_focus()
                 self.set_focus()
@@ -1571,7 +1578,6 @@ class ObjRecord(object):
         self.changed=False
         self.deleted=False
         self.listeners={}
-        self.disable_on_change=False
 
     def add_event_listener(self,event,listener):
         self.listeners.setdefault(event,[]).append(listener)
@@ -1695,9 +1701,10 @@ class ObjRecord(object):
     def save(recs):
         for rec in recs:
             op=rec.get_op()
+            log("============")
+            log("SAVE",rec.model,op)
             if not op:
                 continue
-            log("SAVE",rec.model,op)
             if op[0]==0:
                 rec.id=rpc_exec(rec.model,"create",op[2])
             elif op[0]==1:
