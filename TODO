@@ -1,6 +1,8 @@
-- m2m edit,ref type,list back/fwd, filter, list scroll, form scroll
-- fix: act new
 - user pref
+- list back/fwd, filter, list scroll, form scroll
+- fix: prod form
+- fix: act new
+- fix: on_change/wdg refresh
 - tree editable
 - check required
 - resizable screen

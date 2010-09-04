@@ -35,6 +35,7 @@ parser.add_option("-P","--port",dest="port",help="port number",metavar="HOST",de
 parser.add_option("-d","--db",dest="dbname",help="database",metavar="DB")
 parser.add_option("-u","--uid",dest="uid",help="user ID",metavar="UID",default=1)
 parser.add_option("-p","--passwd",dest="passwd",help="user password",metavar="PASSWD",default="admin")
+parser.add_option("--pref",action="store_true",dest="user_pref",help="edit user preferences",default=False)
 parser.add_option("--debug",action="store_true",dest="debug",help="debug mode",default=False)
 (opts,args)=parser.parse_args()
 
@@ -1446,7 +1447,7 @@ class InputSelect(StringInput):
         return ""
 
     def on_edit(self,string,source):
-        if self.value:
+        if self.get_val():
             self.set_val(False)
         super(InputSelect,self).on_edit(string,source)
 
@@ -2352,6 +2353,11 @@ class FormMode(ScrollPanel):
         self.fields=self.view["fields"]
         if self.form:
             self.remove(self.form)
+        if not self.record:
+            if self.parent.records:
+                self.record=self.parent.records[0]
+            else:
+                self.record=ObjRecord(self.parent.model)
         self.record.remove_event_listener("change")
         self.form=self.parse(arch,self.view["fields"])
         self.add(self.form)
@@ -2646,6 +2652,9 @@ class RootPanel(DeckPanel):
         domain=act.get("domain") and eval(act["domain"]) or []
         context=act.get("context") and eval(act["context"]) or {}
         view_ids={}
+        if act.get("views"):
+            for (view_id,mode) in act.get("views"):
+                view_ids[mode]=view_id
         if act.get("view_id"):
             view_ids[modes[0]]=act["view_id"][0]
         ids=rpc_exec(model,"search",domain,0,10,False,context)
@@ -2713,7 +2722,7 @@ def act_window(act_id,_act=None):
     if _act:
         act=_act
     else:
-        act=rpc_exec("ir.actions.act_window","read",act_id,["name","res_model","domain","view_type","view_mode","view_id","context"])
+        act=rpc_exec("ir.actions.act_window","read",[act_id],False)[0]
     root_panel.new_window(act)
 
 def action(act_id,_act=None):
@@ -2733,7 +2742,11 @@ def start(stdscr):
     root_panel=RootPanel()
     user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
     root_panel.status.set_user(user["name"])
-    action(user["action_id"][0])
+    if opts.user_pref:
+        act_id=rpc_exec("res.users","action_get")
+    else:
+        act_id=user["action_id"][0]
+    action(act_id)
     while 1:
         k=screen.getch()
         if dbg_mode:
