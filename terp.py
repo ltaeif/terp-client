@@ -1557,17 +1557,165 @@ class InputReference(StringInput):
         return False
 
 class InputText(Input):
+    def on_keypress(self,k,source):
+        if self.readonly:
+            return False
+        if curses.ascii.isprint(k):
+            line=self.lines[self.cur_y]
+            new_line=line[:self.cur_x]+chr(k)+line[self.cur_x:]
+            self.lines[self.cur_y]=new_line
+            self.cur_x+=1
+            if self.cur_x-self.cur_x0>(self.w-2)-1:
+                self.cur_x0=self.cur_x-(self.w-2)+1
+            self.draw()
+            self.to_screen()
+            self.set_cursor()
+            return True
+        elif k==curses.KEY_LEFT:
+            self.cur_x=max(self.cur_x-1,0)
+            if self.cur_x<self.cur_x0:
+                self.cur_x0=self.cur_x
+                self.draw()
+                self.to_screen()
+            self.set_cursor()
+            return True
+        elif k==curses.KEY_RIGHT:
+            line=self.lines[self.cur_y]
+            self.cur_x=min(self.cur_x+1,len(line))
+            if self.cur_x-self.cur_x0>(self.w-2)-1:
+                self.cur_x0=self.cur_x-(self.w-2)+1
+                self.draw()
+                self.to_screen()
+            self.set_cursor()
+            return True
+        elif k==curses.KEY_UP:
+            if self.cur_y>0:
+                self.cur_y-=1
+                self.cur_x=min(self.cur_x,len(self.lines[self.cur_y]))
+                if self.cur_y<self.cur_y0:
+                    self.cur_y0=self.cur_y
+                    self.draw()
+                    self.to_screen()
+                self.set_cursor()
+                return True
+        elif k==curses.KEY_DOWN:
+            if self.cur_y<len(self.lines)-1:
+                self.cur_y+=1
+                self.cur_x=min(self.cur_x,len(self.lines[self.cur_y]))
+                if self.cur_y-self.cur_y0>(self.h-2)-1:
+                    self.cur_y0=self.cur_y-(self.h-2)+1
+                    self.draw()
+                    self.to_screen()
+                self.set_cursor()
+                return True
+        elif k==263:
+            if self.cur_x>=1:
+                line=self.lines[self.cur_y]
+                new_line=line[:self.cur_x-1]+line[self.cur_x:]
+                self.lines[self.cur_y]=new_line
+                self.cur_x-=1
+                if self.cur_x<self.cur_x0:
+                    self.cur_x0=self.cur_x
+                self.draw()
+                self.to_screen()
+                self.set_cursor()
+            elif self.cur_y>0:
+                line=self.lines.pop(self.cur_y)
+                prev_line=self.lines[self.cur_y-1]
+                self.lines[self.cur_y-1]=prev_line+line
+                self.cur_y-=1
+                if self.cur_y<self.cur_y0:
+                    self.cur_y0=self.cur_y
+                self.cur_x=len(prev_line)
+                self.draw()
+                self.to_screen()
+                self.set_cursor()
+            return True
+        elif k==330:
+            line=self.lines[self.cur_y]
+            if self.cur_x<=len(line)-1:
+                new_line=line[:self.cur_x]+line[self.cur_x+1:]
+                self.lines[self.cur_y]=new_line
+                self.draw()
+                self.to_screen()
+                self.set_cursor()
+            elif self.cur_y<len(self.lines)-1:
+                next_line=self.lines.pop(self.cur_y+1)
+                line=self.lines[self.cur_y]
+                self.lines[self.cur_y]=line+next_line
+                self.draw()
+                self.to_screen()
+                self.set_cursor()
+            return True
+        elif k==ord('\n'):
+            line=self.lines[self.cur_y]
+            new_line=line[self.cur_x:]
+            self.lines[self.cur_y]=line[:self.cur_x]
+            self.lines.insert(self.cur_y+1,new_line)
+            self.cur_y+=1
+            if self.cur_y-self.cur_y0>(self.h-2)-1:
+                self.cur_y0=self.cur_y-(self.h-2)+1
+            self.cur_x=0
+            self.cur_x0=0
+            self.draw()
+            self.to_screen()
+            self.set_cursor()
+            return True
+
+    def on_field_change(self):
+        super(InputText,self).on_field_change()
+        val=self.get_val()
+        self.lines=val and val.split("\n") or [""]
+        self.cur_x=0
+        self.cur_x0=0
+        self.cur_y=0
+        self.cur_y0=0
+
     def __init__(self):
         super(InputText,self).__init__()
         self.maxh=7
         self.maxw=-1
+        self.cur_y=0
+        self.cur_y0=0
+        self.cur_x=0
+        self.cur_x0=0
+        self.lines=[]
+        self.add_event_listener("keypress",self.on_keypress)
 
     def draw(self):
         win=self.window
         curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        for i in range(self.h-2):
+            line_no=i+self.cur_y0
+            if line_no<len(self.lines):
+                line=self.lines[line_no]
+            else:
+                line=""
+            s=line[self.cur_x0:self.cur_x0+self.w-2]
+            s=s.encode('ascii','replace')
+            s+=" "*(self.w-2-len(s))
+            win.addstr(self.y+1+i,self.x+1,s)
 
     def set_cursor(self):
-        screen.move(self.win_y+self.y+1,self.win_x+self.x+1)
+        screen.move(self.win_y+self.y+1+self.cur_y-self.cur_y0,self.win_x+self.x+1+self.cur_x-self.cur_x0)
+
+    def to_screen(self):
+        win=self.window
+        win.refresh(self.y,self.x,self.win_y+self.y,self.win_x+self.x,self.win_y+self.y+self.h,self.win_x+self.x+self.w)
+
+    def _compute_pass1(self):
+        if self.readonly:
+            self.maxw=max([len(line) for line in self.lines])+2
+        else:
+            self.maxw=-1
+
+    def on_unfocus(self,arg,source):
+        if not self.readonly:
+            val='\n'.join(self.lines) or False
+            old_val=self.get_val()
+            if val!=old_val:
+                self.set_val(val)
+                self.apply_on_change()
 
 class ObjRecord(object):
     def __init__(self,model,id=None):
@@ -1794,6 +1942,7 @@ class TreeMode(HorizontalPanel):
                         link.string=self.parent.field["string"]
                         link.form_mode.view=self.parent.field["views"].get("form")
                         link.form_mode.record=ObjRecord(self.parent.model)
+                        link.form_mode.load_view()
                         link.form_mode.record.read(link.form_mode.view["fields"])
                         def on_close(save=False):
                             if save:
@@ -2053,6 +2202,8 @@ class TreeMode(HorizontalPanel):
                     link.form_mode.record.id=rec.id
                     link.form_mode.record.vals=rec.vals.copy()
                     link.form_mode.record.fields=rec.fields.copy()
+                    link.model=self.parent.model
+                    link.form_mode.load_view()
                     link.form_mode.record.read(link.form_mode.view["fields"])
                     def on_close(save=False):
                         if save:
@@ -2601,7 +2752,6 @@ class LinkPopup(Table):
         self.view_wg=None
 
     def show(self):
-        self.form_mode.load_view()
         self.form_mode.record.set_vals(self.form_mode.record.vals,self.form_mode.record.fields)
         self.title.string="Link: "+self.string
         root_panel.show_popup(self)
