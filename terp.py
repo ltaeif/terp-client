@@ -1432,8 +1432,14 @@ class InputSelect(StringInput):
         if k==ord("\n"):
             wg=SelectBox()
             wg.selection=self.field["selection"]
-            wg.target_wg=self
-            wg.show(self.y+1,self.x,self.str_val)
+            def on_close(val):
+                self.set_val(val)
+                root_panel.draw()
+                root_panel.refresh()
+                self.set_focus()
+                self.set_cursor()
+            wg.on_close=on_close
+            wg.show(self.win_y+self.y,self.win_x+self.x,self.str_val)
 
     def __init__(self):
         super(InputSelect,self).__init__()
@@ -2442,25 +2448,59 @@ class InputM2M_list(StringInput):
 
 class SelectBox(ListView):
     def on_open(self,line_no):
-        val=self.selection[line_no][0]
-        self.target_wg.set_val(val)
+        line=self.lines[line_no]
+        val=line.record.get_val('code')
+        root_panel.remove(self)
+        self.on_close(val)
+
+    def on_keypress(self,k,source):
+        res=super(SelectBox,self).on_keypress(k,source)
+        if res:
+            return True
+        if k==curses.KEY_DOWN:
+            ind=self.get_tabindex()
+            i=ind.index(source)
+            i=(i+1)%len(ind)
+            self.clear_focus()
+            ind[i].set_focus()
+            ind[i].set_cursor()
+        elif k==curses.KEY_UP:
+            ind=self.get_tabindex()
+            i=ind.index(source)
+            i=(i-1)%len(ind)
+            self.clear_focus()
+            ind[i].set_focus()
+            ind[i].set_cursor()
+        return True
 
     def __init__(self):
         super(SelectBox,self).__init__()
         self.col=1
-        self.names=["string"]
+        self.selection={}
 
     def show(self,y,x,query):
+        recs=[]
         for k,v in self.selection:
-            self.add_line({"string":v,"name":k})
+            rec=ObjRecord(None)
+            rec.vals={"name":v,"code":k}
+            recs.append(rec)
+        self.add_records(recs)
+        self.window=screen
+        self.win_y=0
+        self.win_x=0
+        self.borders=[1,1,1,1]
         self._compute_pass1()
+        self.h=self.maxh
         self.w=self.maxw
         self.y=y
         self.x=x
         self._compute_pass2()
         self.draw()
         screen.refresh()
+        root_panel.clear_focus()
         self.set_focus()
+        self.set_cursor()
+        root_panel.add(self)
 
 class SearchPopup(Table):
     def __init__(self):
