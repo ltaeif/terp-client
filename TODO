@@ -1,10 +1,9 @@
 - list back/fwd, filter, list scroll, form scroll
-- fix: prod form en/th
 - fix: act new
-- fix: text
 - fix: search btns
 - fix: record changed propag
 - fix: notebook height
+- form prev/next
 - tree editable
 - check required
 - resizable screen

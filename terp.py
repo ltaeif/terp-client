@@ -2862,9 +2862,25 @@ class RootPanel(DeckPanel):
                 view_ids[mode]=view_id
         if act.get("view_id"):
             view_ids[modes[0]]=act["view_id"][0]
-        ids=rpc_exec(model,"search",domain,0,10,False,context)
         win=ObjBrowser(model,name=name,type=type,modes=modes,view_ids=view_ids,context=context,window=True)
-        win.records=[ObjRecord(model,id) for id in ids]
+        new_rec=False
+        if modes and modes[0]=="form":
+            has_id=False
+            for cond in domain:
+                if cond[0]=="id":
+                    has_id=True
+                    break
+            if not has_id:
+                new_rec=True
+        if new_rec:
+            rec=ObjRecord(model)
+            for cond in domain:
+                rec.vals[cond[0]]=cond[2]
+            recs=[rec]
+        else:
+            ids=rpc_exec(model,"search",domain,0,10,False,context)
+            recs=[ObjRecord(model,id) for id in ids]
+        win.records=recs
         win.maxh=-1
         self.windows.add(win)
         self.windows.set_cur_wg(win)
