@@ -1,8 +1,9 @@
-- user pref
 - list back/fwd, filter, list scroll, form scroll
-- fix: prod form
+- fix: prod form en/th
 - fix: act new
 - fix: on_change/wdg refresh
+- fix: float
+- fix: text
 - tree editable
 - check required
 - resizable screen

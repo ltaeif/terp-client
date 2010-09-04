@@ -2188,7 +2188,7 @@ class FormMode(ScrollPanel):
                     mb.show("Error","Calendar view not supported",["OK"])
                 elif self.cur_cmd=="G":
                     mb=MessageBox()
-                    mb.show("Error","Gantt view not supported",["OK"])
+                    mb.show("Error","Graph view not supported",["OK"])
 
     def __init__(self):
         super(FormMode,self).__init__()
