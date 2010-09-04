@@ -631,11 +631,11 @@ class Table(Panel):
         self._next_cy=0
 
     def add(self,wg):
-        if not wg.colspan or wg.colspan+wg.colspan_follow>self.col:
-            raise Exception("invalid colspan")
-        if self._next_cx+wg.colspan+wg.colspan_follow>self.col:
+        if self._next_cx and self._next_cx+wg.colspan+wg.colspan_follow>self.col:
             self._next_cy+=1
             self._next_cx=0
+        if wg.colspan>self.col:
+            wg.colspan=self.col
         wg.cy=self._next_cy
         wg.cx=self._next_cx
         wg.parent=self
@@ -2776,7 +2776,7 @@ def action(act_id,_act=None):
         raise Exception("Unsupported action type: %s"%act["type"])
 
 def start(stdscr):
-    global screen,root_panel
+    global screen,root_panel,dbg_mode
     screen=stdscr
     screen.keypad(1)
     root_panel=RootPanel()
@@ -2793,7 +2793,6 @@ def start(stdscr):
             set_trace()
         if k==ord('D'):
             #set_trace()
-            global dbg_mode
             dbg_mode=1
         source=root_panel.get_focus()
         if not source:
