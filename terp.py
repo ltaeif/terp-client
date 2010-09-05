@@ -32,7 +32,7 @@ import re
 
 parser=OptionParser()
 parser.add_option("-H","--host",dest="host",help="host name",metavar="HOST",default="127.0.0.1")
-parser.add_option("-P","--port",dest="port",help="port number",metavar="HOST",default=8069)
+parser.add_option("-P","--port",dest="port",help="port number",metavar="PORT",type="int",default=8069)
 parser.add_option("-d","--db",dest="dbname",help="database",metavar="DB")
 parser.add_option("-u","--uid",dest="uid",help="user ID",metavar="UID",default=1)
 parser.add_option("-p","--passwd",dest="passwd",help="user password",metavar="PASSWD",default="admin")
