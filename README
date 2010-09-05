@@ -10,11 +10,12 @@ Usage: terp.py [options]
 Options:
   -h, --help            show this help message and exit
   -H HOST, --host=HOST  host name
-  -P HOST, --port=HOST  port number
+  -P PORT, --port=PORT  port number
   -d DB, --db=DB        database
   -u UID, --uid=UID     user ID
   -p PASSWD, --passwd=PASSWD
                         user password
+  --pref                edit user preferences
   --debug               debug mode
 
 Acknowledgements

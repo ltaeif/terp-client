@@ -34,7 +34,7 @@ parser=OptionParser()
 parser.add_option("-H","--host",dest="host",help="host name",metavar="HOST",default="127.0.0.1")
 parser.add_option("-P","--port",dest="port",help="port number",metavar="PORT",type="int",default=8069)
 parser.add_option("-d","--db",dest="dbname",help="database",metavar="DB")
-parser.add_option("-u","--uid",dest="uid",help="user ID",metavar="UID",default=1)
+parser.add_option("-u","--uid",dest="uid",help="user ID",metavar="UID",type="int",default=1)
 parser.add_option("-p","--passwd",dest="passwd",help="user password",metavar="PASSWD",default="admin")
 parser.add_option("--pref",action="store_true",dest="user_pref",help="edit user preferences",default=False)
 parser.add_option("--debug",action="store_true",dest="debug",help="debug mode",default=False)
@@ -2915,7 +2915,7 @@ class RootPanel(DeckPanel):
                 rec.vals[cond[0]]=cond[2]
             recs=[rec]
         else:
-            ids=rpc_exec(model,"search",domain,0,10,False,context)
+            ids=rpc_exec(model,"search",domain,0,80,False,context)
             recs=[ObjRecord(model,id) for id in ids]
         win.records=recs
         win.maxh=-1

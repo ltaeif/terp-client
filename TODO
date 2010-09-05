@@ -4,6 +4,7 @@
 - fix: record changed propag
 - fix: notebook height
 - fix: admin menu?
+- show scrollbar only when needed
 - form prev/next
 - tree editable
 - check required
