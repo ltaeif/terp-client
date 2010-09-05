@@ -89,6 +89,9 @@ class Widget(object):
     def on_unfocus(self,arg,source):
         pass
 
+    def on_cursor_move(self,arg,source):
+        pass
+
     def __init__(self):
         self.x=None
         self.y=None
@@ -116,8 +119,10 @@ class Widget(object):
         self.listeners={
             "keypress": [],
             "unfocus": [],
+            "cursor_move": [],
         }
         self.add_event_listener("unfocus",self.on_unfocus)
+        self.add_event_listener("cursor_move",self.on_cursor_move)
         self.record=None
         self.name=None
         self.field=None
@@ -185,7 +190,7 @@ class Widget(object):
         return self.has_focus and self or None
 
     def set_cursor(self):
-        screen.move(self.win_y+self.y,self.win_x+self.x)
+        self.move_cursor(self.y,self.x)
 
     def init_attrs(self):
         if self.field:
@@ -300,6 +305,10 @@ class Widget(object):
                 return self[name]
         return eval(expr,Env(self))
 
+    def move_cursor(self,y,x):
+        screen.move(self.win_y+y,self.win_x+x)
+        self.process_event("cursor_move",(y,x),self)
+
 class Panel(Widget):
     def __init__(self):
         super(Panel,self).__init__()
@@ -391,17 +400,22 @@ class ScrollPanel(Panel):
                 self.maxh+=self.borders[0]+self.borders[2]
 
     def _compute_pass2(self):
+        if not self._childs:
+            return
+        wg=self._childs[0]
         w=self.w-self.borders[1]-self.borders[3]-1
         h=self.h-self.borders[0]-self.borders[2]
-        for wg in self._childs:
-            wg.y=0
-            wg.x=0
-            wg.w=w
+        wg.y=0
+        wg.x=0
+        wg.w=w
+        if wg.maxh==-1:
             wg.h=h
-            wg.window=curses.newpad(wg.h+10,wg.w+10) #XXX
-            wg.win_y=self.win_y+self.y+self.borders[0]
-            wg.win_x=self.win_x+self.x+self.borders[3]
-            wg._compute_pass2()
+        else:
+            wg.h=wg.maxh
+        wg.window=curses.newpad(wg.h+10,wg.w+10) #XXX
+        wg.win_y=self.win_y+self.y+self.borders[0]-self.y0
+        wg.win_x=self.win_x+self.x+self.borders[3]
+        wg._compute_pass2()
 
     def draw(self):
         win=self.window
@@ -410,13 +424,36 @@ class ScrollPanel(Panel):
             wg.draw()
         if self.borders[0]:
             curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
-        win.vline(self.y+self.borders[0],self.x+self.w-1-self.borders[1],curses.ACS_VLINE,self.h-self.borders[0]-self.borders[2])
-        win.vline(self.y+self.borders[0],self.x+self.w-1-self.borders[1],curses.ACS_CKBOARD,3)
+        h_total=self.h-self.borders[0]-self.borders[2]
+        h0=(h_total*self.y0+wg.h-1)/wg.h
+        h1=h_total*min(self.y0+h_total,wg.h)/wg.h
+        win.vline(self.y+self.borders[0],self.x+self.w-1-self.borders[1],curses.ACS_VLINE,h_total)
+        win.vline(self.y+self.borders[0]+h0,self.x+self.w-1-self.borders[1],curses.ACS_CKBOARD,h1-h0)
 
     def refresh(self):
         wg=self._childs[0]
         wg.window.refresh(self.y0,0,self.y+self.borders[0],self.x+self.borders[3],self.y+self.h-1-self.borders[2],self.x+self.w-1-self.borders[1]-1)
         wg.refresh()
+
+    def on_cursor_move(self,arg,source):
+        if not self._childs:
+            return
+        wg=self._childs[0]
+        if source.window!=wg.window:
+            return
+        y,x=arg
+        if y<self.y0:
+            self.y0=y
+            root_panel.compute()
+            root_panel.draw()
+            root_panel.refresh()
+            return True
+        elif y>self.y0+self.h-self.borders[0]-self.borders[2]-1:
+            self.y0=y-(self.h-self.borders[0]-self.borders[2]-1)
+            root_panel.compute()
+            root_panel.draw()
+            root_panel.refresh()
+            return True
 
 class DeckPanel(Panel):
     def on_keypress(self,k,source):
@@ -566,7 +603,7 @@ class TabPanel(DeckPanel):
             return
         i=self._childs.index(self.cur_wg)
         x=self.tab_x[i]
-        screen.move(self.win_y+self.y,self.win_x+x)
+        self.move_cursor(self.y,x)
 
 class Notebook(DeckPanel):
     def __init__(self):
@@ -585,6 +622,7 @@ class Notebook(DeckPanel):
             x+=len(wg.string)+3
 
     def _compute_pass2(self):
+        #set_trace()
         super(Notebook,self)._compute_pass2()
         self.compute_tabs()
 
@@ -617,7 +655,7 @@ class Notebook(DeckPanel):
         chs=[wg for wg in self._vis_childs()]
         i=chs.index(self.cur_wg)
         x=self.tab_x[i]
-        screen.move(self.win_y+self.y,self.win_x+x)
+        self.move_cursor(self.y,x)
 
 class Table(Panel):
     def __init__(self):
@@ -1078,7 +1116,7 @@ class ListView(Table):
             self.delete_line(line_no)
 
     def set_cursor(self):
-        screen.move(self.win_y+self.y+self.borders[0]+(self.has_header and 1+self.seps[0][0][0] or 0),self.win_x+self.x+self.borders[3])
+        self.move_cursor(self.y+self.borders[0]+(self.has_header and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
 
     def draw(self):
         win=self.window
@@ -1193,7 +1231,7 @@ class Button(Widget):
         win.addstr(self.y,self.x,s)
 
     def set_cursor(self):
-        screen.move(self.win_y+self.y,self.win_x+self.x+1)
+        self.move_cursor(self.y,self.x+1)
 
 class FormButton(Button):
     def on_push(self,arg,source):
@@ -1340,7 +1378,7 @@ class StringInput(Input):
         return True
 
     def set_cursor(self):
-        screen.move(self.win_y+self.y,self.win_x+self.x+self.cur_pos-self.cur_origin)
+        self.move_cursor(self.y,self.x+self.cur_pos-self.cur_origin)
 
     def draw(self):
         win=self.window
@@ -1697,7 +1735,7 @@ class InputText(Input):
             win.addstr(self.y+1+i,self.x+1,s)
 
     def set_cursor(self):
-        screen.move(self.win_y+self.y+1+self.cur_y-self.cur_y0,self.win_x+self.x+1+self.cur_x-self.cur_x0)
+        self.move_cursor(self.y+1+self.cur_y-self.cur_y0,self.x+1+self.cur_x-self.cur_x0)
 
     def to_screen(self):
         win=self.window
@@ -2102,7 +2140,7 @@ class TreeMode(HorizontalPanel):
     def set_cursor(self):
         i=self.commands.index(self.cur_cmd)
         x=self.x+self.w-len(self.commands)*2-1+i*2
-        screen.move(self.win_y+self.y,self.win_x+x)
+        self.move_cursor(self.y,x)
 
     def parse(self,el,fields):
         if el.tag=="tree":
@@ -2391,7 +2429,7 @@ class FormMode(ScrollPanel):
     def set_cursor(self):
         i=self.commands.index(self.cur_cmd)
         x=self.x+self.w-len(self.commands)*2-1+i*2
-        screen.move(self.win_y+self.y,self.win_x+x)
+        self.move_cursor(self.y,x)
 
     def parse(self,el,fields=None,panel=None,form=None):
         if el.tag=="form":
@@ -2533,7 +2571,6 @@ class FormMode(ScrollPanel):
         self.record.remove_event_listener("change")
         self.form=self.parse(arch,self.view["fields"])
         self.add(self.form)
-        self.form.maxh=-1
 
     def read(self):
         self.record.read(self.view["fields"])
