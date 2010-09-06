@@ -2335,6 +2335,8 @@ class TreeMode(HorizontalPanel):
                     link.on_close=on_close
                     link.show()
                 else:
+                    if dbg_mode:
+                        set_trace()
                     line=self.tree.lines[line_no]
                     rec=line.record
                     self.parent.cur_mode="form"
@@ -2637,8 +2639,6 @@ class FormMode(ScrollPanel):
             raise Exception("invalid tag in form view: "+el.tag)
 
     def load_view(self):
-        if self.form:
-            return
         if not self.view:
             self.view=rpc_exec(self.parent.model,"fields_view_get",self.view_id or False,"form",self.parent.context)
         arch=xml.etree.ElementTree.fromstring(self.view["arch"])

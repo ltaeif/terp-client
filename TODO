@@ -1,3 +1,4 @@
+- simplify event handler declaration (avoid sub funcs)
 - list back/fwd, filter
 - fix: search btns
 - fix: record changed propag
@@ -12,6 +13,8 @@
 - toolbar
 - mouse support
 - wizards
+- dashboards (without graph)
 - tryton backend support
 - color!
 - web demo using shellinabox
+- cleanup
