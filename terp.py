@@ -958,6 +958,8 @@ class Table(Panel):
         y1=self.y+self.h-self.borders[2]
         for i in range(1,self.col):
             if self._get_sep_style("x",i):
+                if not self.w_left[i]<self.w:
+                    continue
                 x=x0+self.w_left[i]
                 win.vline(y0+1,x,curses.ACS_VLINE,y1-y0-1)
                 if self.borders[0]:
@@ -1161,6 +1163,8 @@ class ListView(VerticalPanel):
             w_left=None
         if w_left:
             for sep_x in w_left[1:-1]:
+                if not sep_x<self.w-1:
+                    continue
                 x=self.x+sep_x
                 win.addch(self.y-1,x,curses.ACS_TTEE)
                 win.addch(self.y+1,x,curses.ACS_PLUS)
