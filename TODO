@@ -1,10 +1,7 @@
-- list back/fwd, filter, list scroll
-- fix: act new
+- list back/fwd, filter
 - fix: search btns
 - fix: record changed propag
 - fix: notebook height
-- fix: admin menu?
-- show scrollbar only when needed
 - form prev/next
 - tree editable
 - check required
