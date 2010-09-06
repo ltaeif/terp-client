@@ -425,8 +425,8 @@ class ScrollPanel(Panel):
         for wg in self._childs:
             wg.window.clear()
             wg.draw()
-        #if self.borders[0]:
-        #    curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        if self.borders[0]:
+            curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
         h_total=self.h-self.borders[0]-self.borders[2]
         if wg.h:
             h0=(h_total*self.y0+wg.h-1)/wg.h
@@ -434,8 +434,9 @@ class ScrollPanel(Panel):
         else:
             h0=0
             h1=h_total
-        win.vline(self.y+self.borders[0],self.x+self.w-1-self.borders[1],curses.ACS_VLINE,h_total)
-        win.vline(self.y+self.borders[0]+h0,self.x+self.w-1-self.borders[1],curses.ACS_CKBOARD,h1-h0)
+        if not (h0==0 and h1==h_total):
+            win.vline(self.y+self.borders[0],self.x+self.w-1-self.borders[1],curses.ACS_VLINE,h_total)
+            win.vline(self.y+self.borders[0]+h0,self.x+self.w-1-self.borders[1],curses.ACS_CKBOARD,h1-h0)
 
     def refresh(self):
         wg=self._childs[0]
@@ -1182,6 +1183,8 @@ class ListView(VerticalPanel):
         super(ListView,self)._compute_pass1()
         if self.headers and self.table._childs:
             for wg_t in self.table._childs:
+                if wg_t.invisible:
+                    continue
                 if wg_t.maxw==-1:
                     continue
                 wg_h=self.headers._childs[wg_t.cx]
