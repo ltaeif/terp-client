@@ -697,6 +697,11 @@ class Table(Panel):
         self._next_cx+=wg.colspan
         self.num_rows=wg.cy+1
 
+    def pop(self):
+        wg=self._childs.pop()
+        self._next_cx-=wg.colspan
+        return wg
+
     def insert_row(self,cy,row):
         cx=0
         for wg in row:
@@ -2296,7 +2301,7 @@ class TreeMode(HorizontalPanel):
             self.view=rpc_exec(self.parent.model,"fields_view_get",self.view_id or False,"tree",self.parent.context)
         arch=xml.etree.ElementTree.fromstring(self.view["arch"])
         if self.tree:
-            self.remove(self.tree)
+            self.pop()
         self.tree=self.parse(arch,self.view["fields"])
         self.add(self.tree)
         self.tree.scroll.maxh=-1
