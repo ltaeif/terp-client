@@ -62,7 +62,8 @@ dbg_mode=0
 def log(*args):
     if not log_file:
         return
-    msg=" ".join([str(a) for a in args])
+        s=s.encode('ascii','replace')
+    msg=" ".join([unicode(a).encode('ascii','replace') for a in args])
     log_file.write(msg+"\n")
     log_file.flush()
 
@@ -2066,7 +2067,7 @@ class TreeMode(HorizontalPanel):
                         def on_close(save=False):
                             if save:
                                 rec=link.form_mode.record.copy()
-                                self.parent.records.append(rec)
+                                self.parent.record.set_val(self.parent.name,self.parent.records+[rec])
                                 self.read()
                             root_panel.close_popup(link)
                             root_panel.clear_focus()
