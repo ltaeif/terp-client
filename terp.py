@@ -99,6 +99,7 @@ class Widget(object):
         self.h=None
         self.maxw=None
         self.maxh=None
+        self.extw=None
         self.update_maxw=True
         self.update_maxh=True
         self.borders=[0,0,0,0]
@@ -828,6 +829,7 @@ class Table(Panel):
             wg.w=0
         w_left=[0]*(self.col+1)
         w_rest=w_avail
+        use_extra=False
         # allocate space fairly to every child
         while w_rest>0:
             w_alloc=w_rest-self._total_sep_size("x")
@@ -837,10 +839,13 @@ class Table(Panel):
                 dw=1
             incr=False
             for wg in self._vis_childs():
-                if wg.maxw!=-1:
-                    if not wg.w<wg.maxw:
+                maxw=wg.maxw
+                if maxw!=-1:
+                    if use_extra and wg.extw:
+                        maxw+=wg.extw
+                    if not wg.w<maxw:
                         continue
-                    dw_=min(dw,wg.maxw-wg.w)
+                    dw_=min(dw,maxw-wg.w)
                 else:
                     dw_=dw
                 wg.w+=dw_
@@ -855,7 +860,10 @@ class Table(Panel):
                     if w_rest==0:
                         break
             if not incr:
-                break
+                if use_extra:
+                    break
+                else:
+                    use_extra=True
         self.w_left=w_left
         # add extra cell space to regions
         for wg in self._vis_childs():
@@ -1173,14 +1181,11 @@ class ListView(VerticalPanel):
     def _compute_pass1(self):
         super(ListView,self)._compute_pass1()
         if self.headers and self.table._childs:
-            for i in range(len(self.headers._childs)):
-                wg_h=self.headers._childs[i]
-                wg_t=self.table._childs[i]
-                if wg_t.maxw!=-1:
-                    if wg_h.maxw!=-1:
-                        wg_t.maxw=max(wg_t.maxw,wg_h.maxw)
-                    else:
-                        wg_t.maxw=-1
+            for wg_t in self.table._childs:
+                if wg_t.maxw==-1:
+                    continue
+                wg_h=self.headers._childs[wg_t.cx]
+                wg_t.extw=max(0,wg_h.maxw-wg_t.maxw)
 
     def _compute_pass2(self):
         super(ListView,self)._compute_pass2()
@@ -1445,7 +1450,8 @@ class StringInput(Input):
         win=self.window
         s=self.str_val[self.cur_origin:self.cur_origin+self.w]
         s=s.encode('ascii','replace')
-        s+="_"*(self.w-len(s))
+        if not self.readonly:
+            s+="_"*(self.w-len(s))
         win.addstr(self.y,self.x,s)
 
     def to_screen(self):
