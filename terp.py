@@ -414,7 +414,7 @@ class ScrollPanel(Panel):
             wg.h=h
         else:
             wg.h=wg.maxh
-        wg.window=curses.newpad(wg.h+10,wg.w+10) #XXX
+        wg.window=curses.newpad(wg.h+1,wg.w) # XXX: python-curses bug? should not need h+1 (can't write in bottom-right corner of window)
         wg.win_y=self.win_y+self.y+self.borders[0]-self.y0
         wg.win_x=self.win_x+self.x+self.borders[3]
         wg._compute_pass2()
@@ -434,7 +434,13 @@ class ScrollPanel(Panel):
 
     def refresh(self):
         wg=self._childs[0]
-        wg.window.refresh(self.y0,0,self.y+self.borders[0],self.x+self.borders[3],self.y+self.h-1-self.borders[2],self.x+self.w-1-self.borders[1]-1)
+        if dbg_mode:
+            set_trace()
+        y0=self.y+self.borders[0]
+        x0=self.x+self.borders[3]
+        y1=y0+min(self.h-self.borders[2]-self.borders[0],wg.h)-1
+        x1=x0+min(self.w-self.borders[1]-self.borders[3],wg.w)-1
+        wg.window.refresh(self.y0,0,y0,x0,y1,x1)
         wg.refresh()
 
     def on_cursor_move(self,arg,source):
@@ -1041,7 +1047,7 @@ class ListView(ScrollPanel):
         self.add_event_listener("keypress",self.on_keypress)
         self.table=Table()
         self.table.colspan=1
-        self.table.seps=[[(0,False)],[(1,False)]]
+        self.table.seps=[[(0,False)],[(1,True)]]
         self.add(self.table)
         self.headers=None
 
@@ -1152,7 +1158,7 @@ class ListView(ScrollPanel):
             win.addch(self.y-1,x,curses.ACS_TTEE)
             win.addch(self.y,x,curses.ACS_VLINE)
             win.addch(self.y+1,x,curses.ACS_PLUS)
-            tb.window.vline(0,tb.w_left[i],curses.ACS_VLINE,tb.h)
+            win.vline(self.y+2,x,curses.ACS_VLINE,self.h-2) # XXX
             win.addch(self.y+self.h,x,curses.ACS_BTEE)
 
     def set_lines(self,lines):
