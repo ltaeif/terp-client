@@ -586,6 +586,7 @@ class TabPanel(DeckPanel):
                 if source==self:
                     self.remove(self.cur_wg)
                     root_panel.draw()
+                    root_panel.refresh()
                     root_panel.set_cursor()
         self.add_event_listener("keypress",on_keypress)
 
