@@ -99,6 +99,8 @@ class Widget(object):
         self.h=None
         self.maxw=None
         self.maxh=None
+        self.update_maxw=True
+        self.update_maxh=True
         self.borders=[0,0,0,0]
         self.padding=[0,0,0,0]
         self.valign="top"
@@ -306,8 +308,8 @@ class Widget(object):
         return eval(expr,Env(self))
 
     def move_cursor(self,y,x):
-        screen.move(self.win_y+y,self.win_x+x)
         self.process_event("cursor_move",(y,x),self)
+        screen.move(self.win_y+y,self.win_x+x)
 
 class Panel(Widget):
     def __init__(self):
@@ -390,11 +392,11 @@ class ScrollPanel(Panel):
             wg._compute_pass1()
         else:
             wg=None
-        if self.maxw is None:
+        if self.update_maxw:
             self.maxw=wg and wg.maxw or 1
             if self.maxw!=-1:
                 self.maxw+=self.borders[1]+self.borders[3]+1
-        if self.maxh is None:
+        if self.update_maxh:
             self.maxh=wg and wg.maxh or 1
             if self.maxh!=-1:
                 self.maxh+=self.borders[0]+self.borders[2]
@@ -422,8 +424,8 @@ class ScrollPanel(Panel):
         for wg in self._childs:
             wg.window.clear()
             wg.draw()
-        if self.borders[0]:
-            curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
+        #if self.borders[0]:
+        #    curses.textpad.rectangle(win,self.y,self.x,self.y+self.h-1,self.x+self.w-1)
         h_total=self.h-self.borders[0]-self.borders[2]
         h0=(h_total*self.y0+wg.h-1)/wg.h
         h1=h_total*min(self.y0+h_total,wg.h)/wg.h
@@ -504,13 +506,13 @@ class DeckPanel(Panel):
         if not self.cur_wg:
             return
         self.cur_wg._compute_pass1()
-        if self.maxw is None:
+        if self.update_maxw:
             maxw=self.cur_wg.maxw
             if maxw==-1:
                 self.maxw=-1
             else:
                 self.maxw=maxw+self.borders[1]+self.borders[3]+self.padding[1]+self.padding[3]
-        if self.maxh is None:
+        if self.update_maxh:
             maxh=self.cur_wg.maxh
             if maxh==-1:
                 self.maxh=-1
@@ -622,7 +624,6 @@ class Notebook(DeckPanel):
             x+=len(wg.string)+3
 
     def _compute_pass2(self):
-        #set_trace()
         super(Notebook,self)._compute_pass2()
         self.compute_tabs()
 
@@ -711,6 +712,8 @@ class Table(Panel):
             if wg.cy>cy:
                 wg.cy-=1
         self.num_rows-=1
+        if self._next_cy==cy:
+            self._next_cx=0
         if self._next_cy>0:
             self._next_cy-=1
 
@@ -760,7 +763,7 @@ class Table(Panel):
             if hasattr(widget,"_compute_pass1"):
                 widget._compute_pass1()
         # 1. compute container max width
-        if self.maxw is None:
+        if self.update_maxw:
             expand=False
             for wg in self._vis_childs():
                 if wg.maxw==-1:
@@ -782,7 +785,7 @@ class Table(Panel):
                     w_left.append(w_max)
                 self.maxw=self.borders[3]+self.borders[1]+w_left[-1]
         # 2. compute container max height
-        if self.maxh is None:
+        if self.update_maxh:
             expand=False
             for wg in self._vis_childs():
                 if wg.maxh==-1:
@@ -934,8 +937,10 @@ class Table(Panel):
             if self._get_sep_style("x",i):
                 x=x0+self.w_left[i]
                 win.vline(y0+1,x,curses.ACS_VLINE,y1-y0-1)
-                win.addch(y0,x,curses.ACS_TTEE)
-                win.addch(y1,x,curses.ACS_BTEE)
+                if self.borders[0]:
+                    win.addch(y0,x,curses.ACS_TTEE)
+                if self.borders[1]:
+                    win.addch(y1,x,curses.ACS_BTEE)
         # draw horizontal separators
         y0=self.y+self.borders[0]
         x0=self.x+self.borders[3]-1
@@ -1003,25 +1008,21 @@ class ListLine(object):
         self.selected=False
         self.widgets=[]
 
-class ListView(Table):
+class ListView(ScrollPanel):
     def on_open(self,line_no):
         self.process_event("open",line_no,self)
 
     def on_keypress(self,k,source):
         if k==ord("\n"):
-            if source in self._childs:
-                i=self._childs.index(source)
+            if source in self.table._childs:
+                i=self.table._childs.index(source)
                 line_no=i/self.col
-                if self.has_header:
-                    line_no-=1
                 self.on_open(line_no)
             return True
         elif k==ord(" "):
-            if source in self._childs:
-                i=self._childs.index(source)
+            if source in self.table._childs:
+                i=self.table._childs.index(source)
                 line_no=i/self.col
-                if self.has_header:
-                    line_no-=1
                 line=self.lines[line_no]
                 line.selected=not line.selected
                 root_panel.draw()
@@ -1032,21 +1033,25 @@ class ListView(Table):
     def __init__(self):
         super(ListView,self).__init__()
         self.relation=None
-        self.seps=[[(0,False)],[(1,True)]]
         self.lines=[]
         self.num_lines=0
-        self.has_header=False
         self.listeners.update({
             "open": [],
         })
         self.add_event_listener("keypress",self.on_keypress)
+        self.table=Table()
+        self.table.colspan=1
+        self.table.seps=[[(0,False)],[(1,False)]]
+        self.add(self.table)
+        self.headers=None
 
-    def make_header(self,headers):
-        for header in headers:
-            wg=Label()
-            wg.string=header
-            self.add(wg)
-        self.has_header=True
+    def set_col(self,col):
+        self.col=col
+        self.table.col=col
+
+    def set_headers(self,headers):
+        self.headers=headers
+        self.borders=[2,0,0,0]
 
     def make_line_widgets(self,line):
         widgets=[]
@@ -1064,7 +1069,7 @@ class ListView(Table):
         widgets=self.make_line_widgets(line)
         line.widgets=widgets
         for wg in widgets:
-            self.add(wg)
+            self.table.add(wg)
 
     def add_lines(self,lines):
         for line in lines:
@@ -1083,8 +1088,7 @@ class ListView(Table):
         self.num_lines+=1
         widgets=self.make_line_widgets(line)
         line.widgets=widgets
-        row_no=line_no+(self.has_header and 1 or 0)
-        self.insert_row(row_no,widgets)
+        self.table.insert_row(line_no,widgets)
 
     def insert_lines(self,line_no,lines):
         i=line_no
@@ -1103,8 +1107,7 @@ class ListView(Table):
     def delete_line(self,line_no):
         self.lines.pop(line_no)
         self.num_lines-=1
-        row_no=line_no+(self.has_header and 1 or 0)
-        self.delete_row(row_no)
+        self.table.delete_row(line_no)
 
     def delete_lines(self,line_no=None,num=None):
         if line_no==None:
@@ -1116,19 +1119,41 @@ class ListView(Table):
             self.delete_line(line_no)
 
     def set_cursor(self):
-        self.move_cursor(self.y+self.borders[0]+(self.has_header and 1+self.seps[0][0][0] or 0),self.x+self.borders[3])
+        self.move_cursor(self.y+self.borders[0],self.x+self.borders[3])
 
     def draw(self):
         win=self.window
         super(ListView,self).draw()
+        tb=self.table
+        if self.headers:
+            for i in range(self.table.col):
+                header=self.headers[i]
+                x0=tb.x+tb.borders[3]+tb.w_left[i]+tb._get_sep_size("x",i)
+                x1=tb.x+tb.borders[3]+tb.w_left[i+1]
+                if not x1>x0:
+                    continue
+                s=header[:x1-x0]
+                win.addstr(self.y,self.x+x0,s)
+            win.hline(self.y+1,self.x,curses.ACS_HLINE,self.w)
+            win.addch(self.y+1,self.x-1,curses.ACS_LTEE)
+            win.addch(self.y+1,self.x+self.w,curses.ACS_RTEE)
+
         for line in self.lines:
             if line.selected:
                 wg=line.widgets[0]
                 y=wg.y
-                for i in range(self.col):
-                    x0=self.x+self.borders[3]+self.w_left[i]+self._get_sep_size("x",i)
-                    x1=self.x+self.borders[3]+self.w_left[i+1]
-                    win.chgat(y,x0,x1-x0,curses.A_REVERSE)
+                for i in range(self.table.col):
+                    x0=tb.x+tb.borders[3]+tb.w_left[i]+tb._get_sep_size("x",i)
+                    x1=tb.x+tb.borders[3]+tb.w_left[i+1]
+                    tb.window.chgat(y,x0,x1-x0,curses.A_REVERSE)
+
+        for i in range(1,self.table.col):
+            x=self.x+tb.w_left[i]
+            win.addch(self.y-1,x,curses.ACS_TTEE)
+            win.addch(self.y,x,curses.ACS_VLINE)
+            win.addch(self.y+1,x,curses.ACS_PLUS)
+            tb.window.vline(0,tb.w_left[i],curses.ACS_VLINE,tb.h)
+            win.addch(self.y+self.h,x,curses.ACS_BTEE)
 
     def set_lines(self,lines):
         self.delete_lines()
@@ -1137,10 +1162,9 @@ class ListView(Table):
 class TreeView(ListView):
     def on_keypress(self,k,source):
         if k==curses.KEY_RIGHT:
-            if source in self._childs:
-                i=self._childs.index(source)
-                row_no=i/self.col
-                line_no=row_no-(self.has_header and 1 or 0)
+            if source in self.table._childs:
+                i=self.table._childs.index(source)
+                line_no=i/self.col
                 line=self.lines[line_no]
                 if not line.open:
                     self.process_event("expand",line_no,self)
@@ -1152,10 +1176,9 @@ class TreeView(ListView):
                     root_panel.set_cursor()
             return True
         elif k==curses.KEY_LEFT:
-            if source in self._childs:
-                i=self._childs.index(source)
-                row_no=i/self.col
-                line_no=row_no-(self.has_header and 1 or 0)
+            if source in self.table._childs:
+                i=self.table._childs.index(source)
+                line_no=i/self.col
                 line=self.lines[line_no]
                 if line.open:
                     i=line_no+1
@@ -1945,6 +1968,7 @@ class ObjBrowser(DeckPanel):
             self.add(wg)
             wg.set_commands(self.type,self.modes,window=window,add=add)
             wg.maxh=-1
+            wg.update_maxh=False
             if views and mode in views:
                 wg.view=views[mode]
             if view_ids and mode in view_ids:
@@ -2089,9 +2113,9 @@ class TreeMode(HorizontalPanel):
         self.rec_child_pool={}
         if type=="tree":
             self.root_list=ListView()
-            self.root_list.col=1
-            self.root_list.names=["name"]
+            self.root_list.set_col(1)
             self.root_list.maxh=-1
+            self.root_list.update_maxh=False
             self.root_list.borders=[0,0,0,0]
             self.add(self.root_list)
             def on_open(line_no,source):
@@ -2156,8 +2180,8 @@ class TreeMode(HorizontalPanel):
                 else:
                     header=child.attrib["string"]
                 headers.append(header)
-            wg.col=len(headers)
-            wg.make_header(headers)
+            wg.set_col(len(headers))
+            wg.set_headers(headers)
             wg.maxw=-1
             def make_line_widgets(line):
                 record=line.record
@@ -2224,8 +2248,9 @@ class TreeMode(HorizontalPanel):
         self.tree=self.parse(arch,self.view["fields"])
         self.add(self.tree)
         self.tree.maxh=-1
+        self.tree.update_maxh=False
         self.tree.maxw=-1
-        self.tree.seps=[[(1,True),(0,False)],[(1,True)]]
+        self.tree.update_maxw=False
         def on_open(line_no,source):
             if self.parent.type=="form":
                 if self.parent.view_wg:
@@ -2598,6 +2623,7 @@ class InputO2M(ObjBrowser,Input):
     def __init__(self,model,modes=None,views=None):
         super(InputO2M,self).__init__(model,modes=modes,views=views)
         self.maxh=8
+        self.update_maxh=False
 
     def draw(self):
         win=self.window
@@ -2610,15 +2636,13 @@ class InputO2M(ObjBrowser,Input):
         x+=len(s)
         win.addch(self.y,x,curses.ACS_LTEE)
 
-    def load_view(self):
-        super(InputO2M,self).load_view()
-        self.mode_wg["tree"].tree.seps=[[(0,False)],[(1,True)]]
-
 class InputM2M(ObjBrowser,Input):
     def __init__(self,model,modes=None,views=None):
         super(InputM2M,self).__init__(model,modes=modes,views=views,add=True)
         self.maxh=8
+        self.update_max_h=False
         self.maxw=-1
+        self.update_maxw=False
 
     def on_field_change(self):
         val=self.get_val()
@@ -2877,9 +2901,11 @@ class RootPanel(DeckPanel):
         self.add(self.main)
         self.windows=TabPanel()
         self.windows.maxh=-1
+        self.windows.update_maxh=False
         self.main.add(self.windows)
         self.status=StatusPanel()
         self.status.maxh=1
+        self.status.update_maxh=False
         self.main.add(self.status)
         self.add_event_listener("keypress",self.on_keypress)
         self.window=screen
@@ -2919,6 +2945,7 @@ class RootPanel(DeckPanel):
             recs=[ObjRecord(model,id) for id in ids]
         win.records=recs
         win.maxh=-1
+        win.update_maxh=False
         self.windows.add(win)
         self.windows.set_cur_wg(win)
         win.load_view()
@@ -3007,8 +3034,8 @@ def start(stdscr):
     action(act_id)
     while 1:
         k=screen.getch()
-        if dbg_mode:
-            set_trace()
+        #if dbg_mode:
+        #    set_trace()
         if k==ord('D'):
             #set_trace()
             dbg_mode=1

@@ -1,4 +1,4 @@
-- list back/fwd, filter, list scroll, form scroll
+- list back/fwd, filter, list scroll
 - fix: act new
 - fix: search btns
 - fix: record changed propag
@@ -10,7 +10,6 @@
 - check required
 - resizable screen
 - localization
-- form/tree scrolling
 - no exit when error (popup)
 - multiselect for m2m
 - toolbar
