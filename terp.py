@@ -1343,13 +1343,25 @@ class FormButton(Button):
         self.color=get_col_attr("button_color")
 
     def on_push(self,arg,source):
-        type=getattr(self,"type","wizard")
+        type=self.view_attrs.get("type","wizard")
         if type=="wizard":
-            rpc_exec_wkf(form.model,self.name,self.view_wg.obj_id)
-            self.view_wg.read()
+            rpc_exec_wkf(self.record.model,self.view_attrs['name'],self.record.id)
+            #self.view_wg.read()
             root_panel.clear_focus()
             root_panel.set_focus()
             root_panel.set_cursor()
+        elif type=="object":
+            ObjRecord.save([self.record]) # XXX
+            res=rpc_exec(self.record.model,self.view_attrs['name'],[self.record.id])
+            if res:
+                self.record.clear()
+                self.view_wg.read()
+                root_panel.compute()
+                root_panel.draw()
+                root_panel.refresh()
+                root_panel.clear_focus()
+                self.set_focus()
+                self.set_cursor()
         else:
             raise Exception("invalid button type: %s"%type)
 
@@ -2085,6 +2097,7 @@ class TreeMode(HorizontalPanel):
                 if self.cur_cmd=="N":
                     if self.parent.view_wg:
                         link=LinkPopup()
+                        link.model=self.parent.model
                         link.record=self.parent.record
                         link.view_wg=self.parent.view_wg
                         link.string=self.parent.field["string"]
