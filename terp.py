@@ -154,6 +154,7 @@ class Widget(object):
         self.update_can_focus=False
         self.view_wg=None
         self.color=0
+        self.string=None
 
     def to_s(self,d=0):
         s="  "*d
@@ -695,7 +696,8 @@ class Notebook(DeckPanel):
         chs=[wg for wg in self._vis_childs()]
         i=chs.index(self.cur_wg)
         x=self.tab_x[i]
-        self.move_cursor(self.y,x)
+        if x<self.x+self.w:
+            self.move_cursor(self.y,x)
 
 class Table(Panel):
     def __init__(self):
@@ -1227,8 +1229,6 @@ class ListView(VerticalPanel):
 
     def _compute_pass2(self):
         super(ListView,self)._compute_pass2()
-        if dbg_mode:
-            set_trace()
         if self.headers and self.table._childs:
             for i in range(len(self.headers._childs)):
                 wg_h=self.headers._childs[i]
@@ -1700,7 +1700,7 @@ class InputM2O(StringInput):
                 wg=SearchPopup()
                 wg.string=self.field["string"]
                 wg.model=self.field["relation"]
-                wg.query=self.str_val
+                wg.domain=self.domain
                 def on_close(ids):
                     if ids:
                         id=ids[0]
@@ -2722,7 +2722,7 @@ class FormMode(ScrollPanel):
         self.add(self.form)
 
     def read(self):
-        self.record.read(self.view["fields"])
+        self.record.read(self.view["fields"],self.parent.context)
 
     def write(self):
         pass
@@ -2825,7 +2825,7 @@ class SelectBox(ListView):
         self.col=1
         self.selection={}
 
-    def show(self,y,x,query):
+    def show(self,y,x):
         recs=[]
         for k,v in self.selection:
             rec=ObjRecord(None)
@@ -2882,7 +2882,7 @@ class SearchPopup(Table):
         self.model=None
         self.records=None
         self.string=""
-        self.query=""
+        self.domain=[]
         self.context={}
 
     def show(self):
@@ -2895,12 +2895,11 @@ class SearchPopup(Table):
             self.on_close(ids)
         self.tree_mode.tree.add_event_listener("open",on_open)
         self.title.string="Search: "+self.string
-        res=rpc_exec(self.model,"name_search",self.query)
-        if len(res)==1:
-            id=res[0][0]
-            self.on_close([id])
+        ids=rpc_exec(self.model,"search",self.domain)
+        if len(ids)==1:
+            self.on_close(ids)
         else:
-            self.records=[ObjRecord(self.model,r[0]) for r in res]
+            self.records=[ObjRecord(self.model,id) for id in ids]
             self.tree_mode.read()
             root_panel.show_popup(self)
 
@@ -3218,10 +3217,9 @@ def start(stdscr):
     action(act_id)
     while 1:
         k=screen.getch()
-        if dbg_mode:
-            set_trace()
-        if k==ord('D'):
-            #set_trace()
+        #if dbg_mode:
+        #    set_trace()
+        if k==27:
             dbg_mode=1
         source=root_panel.get_focus()
         if not source:
