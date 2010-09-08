@@ -66,8 +66,9 @@ color_pairs={
     "selection_color": [2,"black,white"],
     "tabpanel_color": [3,"black,cyan"],
     "statuspanel_color": [4,"black,cyan"],
-    "separator_color": [5,"cyan,blue"],
-    "command_color": [6,"yellow,blue"],
+    "command_color": [5,"yellow,blue"],
+    "separator_color": [6,"cyan,blue"],
+    "button_color": [7,"green,blue"],
 }
 
 def log(*args):
@@ -618,7 +619,7 @@ class TabPanel(DeckPanel):
         win=self.window
         i=0
         col=get_col_attr("tabpanel_color")
-        win.addstr(self.y,self.x," "*self.w,col) # XXX: use window for this
+        win.addstr(self.y,self.x," "*self.w,col) # XXX: use separate window for this?
         for wg in self._childs:
             x=self.tab_x[i]
             s="%d "%(i+1)
@@ -1323,7 +1324,7 @@ class Button(Widget):
     def draw(self):
         win=self.window
         s="["+self.string[:self.w-2]+"]"
-        win.addstr(self.y,self.x,s)
+        win.addstr(self.y,self.x,s,get_col_attr("button_color"))
 
     def set_cursor(self):
         self.move_cursor(self.y,self.x+1)
