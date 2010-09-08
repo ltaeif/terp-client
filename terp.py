@@ -462,8 +462,6 @@ class ScrollPanel(Panel):
 
     def refresh(self):
         wg=self._childs[0]
-        if dbg_mode:
-            set_trace()
         y0=self.win_y+self.y+self.borders[0]
         x0=self.win_x+self.x+self.borders[3]
         y1=y0+min(self.h-self.borders[2]-self.borders[0],wg.h)-1
@@ -882,17 +880,22 @@ class Table(Panel):
                     dw_=min(dw,maxw-wg.w)
                 else:
                     dw_=dw
-                wg.w+=dw_
-                incr=True
-                w=w_left[wg.cx]+self._get_sep_size("x",wg.cx)+wg.w
+                w=w_left[wg.cx]+self._get_sep_size("x",wg.cx)+wg.w+dw_
                 cr=wg.cx+wg.colspan
                 if w>w_left[cr]:
                     dwl=w-w_left[cr]
+                    if dwl>w_rest:
+                        continue
+                    wg.w+=dw_
+                    incr=True
                     for i in range(cr,self.col+1):
                         w_left[i]+=dwl
-                    w_rest=w_avail-w_left[-1]
+                    w_rest-=dwl
                     if w_rest==0:
                         break
+                else:
+                    wg.w+=dw_
+                    incr=True
             if not incr:
                 if use_extra:
                     break
@@ -931,17 +934,22 @@ class Table(Panel):
                     dh_=min(dh,wg.maxh-wg.h)
                 else:
                     dh_=dh
-                wg.h+=dh_
-                incr=True
-                h=h_top[wg.cy]+self._get_sep_size("y",wg.cy)+wg.h
+                h=h_top[wg.cy]+self._get_sep_size("y",wg.cy)+wg.h+dh_
                 cr=wg.cy+wg.rowspan
                 if h>h_top[cr]:
                     dht=h-h_top[cr]
+                    if dht>h_rest:
+                        continue
+                    wg.h+=dh_
+                    incr=True
                     for i in range(cr,self.num_rows+1):
                         h_top[i]+=dht
-                    h_rest=h_avail-h_top[-1]
+                    h_rest-=dht
                     if h_rest==0:
                         break
+                else:
+                    wg.h+=dh_
+                    incr=True
             if not incr:
                 break
         self.h_top=h_top
@@ -1198,7 +1206,7 @@ class ListView(VerticalPanel):
                 if not sep_x<self.w-1:
                     continue
                 x=self.x+sep_x
-                win.vline(self.y,x,curses.ACS_VLINE,self.h) # XXX (no need to be so long)
+                win.vline(self.y,x,curses.ACS_VLINE,self.h) # XXX no need to be so long
                 win.addch(self.y-1,x,curses.ACS_TTEE)
                 win.addch(self.y+1,x,curses.ACS_PLUS)
                 win.addch(self.y+self.h,x,curses.ACS_BTEE)
@@ -2334,7 +2342,7 @@ class TreeMode(HorizontalPanel):
                         elif field["type"]=="datetime":
                             wg=InputDatetime()
                         elif field["type"]=="text":
-                            wg=InputText()
+                            wg=InputChar()
                         elif field["type"]=="selection":
                             wg=InputSelect()
                         elif field["type"]=="many2one":
@@ -2403,8 +2411,6 @@ class TreeMode(HorizontalPanel):
                     link.on_close=on_close
                     link.show()
                 else:
-                    if dbg_mode:
-                        set_trace()
                     line=self.tree.lines[line_no]
                     rec=line.record
                     self.parent.cur_mode="form"

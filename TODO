@@ -16,6 +16,7 @@
 - mouse support
 - wizards
 - dashboards (without graph)
+- export/import
 - tryton backend support
 - color!
 - web demo using shellinabox
