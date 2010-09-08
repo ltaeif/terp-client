@@ -1,4 +1,5 @@
 - simplify event handler declaration (avoid sub funcs)
+- right-align floats
 - fix o2m in list?
 - list back/fwd, filter
 - fix: search btns

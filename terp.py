@@ -1510,7 +1510,8 @@ class StringInput(Input):
         s=s.encode('ascii','replace')
         if not self.readonly:
             s+="_"*(self.w-len(s))
-        win.addstr(self.y,self.x,s)
+        if s:
+            win.addstr(self.y,self.x,s)
 
     def to_screen(self):
         win=self.window
@@ -1676,21 +1677,41 @@ class InputM2O(StringInput):
     def on_keypress(self,k,source):
         super(InputM2O,self).on_keypress(k,source)
         if k==ord("\n"):
-            wg=SearchPopup()
-            wg.string=self.field["string"]
-            wg.model=self.field["relation"]
-            wg.query=self.str_val
-            def on_close(ids):
-                if ids:
-                    id=ids[0]
-                    self.set_val(id)
-                    self.apply_on_change()
-                root_panel.close_popup(wg)
-                root_panel.clear_focus()
-                self.set_focus()
-                self.set_cursor()
-            wg.on_close=on_close
-            wg.show()
+            val=self.get_val()
+            if val:
+                link=LinkPopup()
+                link.record=self.record
+                link.view_wg=self.view_wg
+                link.string=self.field["string"]
+                link.model=self.field['relation']
+                link.form_mode.record=ObjRecord(link.model,val[0])
+                link.form_mode.load_view()
+                link.form_mode.record.read(link.form_mode.view["fields"])
+                def on_close(save=False):
+                    if save:
+                        ObjRecord.save([link.form_mode.record])
+                    root_panel.close_popup(link)
+                    root_panel.clear_focus()
+                    self.set_focus()
+                    self.set_cursor()
+                link.on_close=on_close
+                link.show()
+            else:
+                wg=SearchPopup()
+                wg.string=self.field["string"]
+                wg.model=self.field["relation"]
+                wg.query=self.str_val
+                def on_close(ids):
+                    if ids:
+                        id=ids[0]
+                        self.set_val(id)
+                        self.apply_on_change()
+                    root_panel.close_popup(wg)
+                    root_panel.clear_focus()
+                    self.set_focus()
+                    self.set_cursor()
+                wg.on_close=on_close
+                wg.show()
 
     def __init__(self):
         super(InputM2O,self).__init__()
