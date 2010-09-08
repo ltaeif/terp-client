@@ -62,10 +62,12 @@ log_file=file("/tmp/terp.log","a")
 dbg_mode=0
 
 color_pairs={
-    "base_color": [1,"white,black"],
+    "base_color": [1,"white,blue"],
     "selection_color": [2,"black,white"],
-    "tabpanel_color": [3,"white,black"],
-    "statuspanel_color": [4,"white,black"],
+    "tabpanel_color": [3,"black,cyan"],
+    "statuspanel_color": [4,"black,cyan"],
+    "separator_color": [5,"cyan,blue"],
+    "command_color": [6,"yellow,blue"],
 }
 
 def log(*args):
@@ -1085,7 +1087,6 @@ class ListView(VerticalPanel):
         self.add_event_listener("keypress",self.on_keypress)
         if header:
             self.headers=Group()
-            self.headers.seps=[[(0,False)],[(1,True)]]
             self.add(self.headers)
         else:
             self.headers=None
@@ -1186,9 +1187,9 @@ class ListView(VerticalPanel):
                 if not sep_x<self.w-1:
                     continue
                 x=self.x+sep_x
+                win.vline(self.y,x,curses.ACS_VLINE,self.h) # XXX (no need to be so long)
                 win.addch(self.y-1,x,curses.ACS_TTEE)
                 win.addch(self.y+1,x,curses.ACS_PLUS)
-                win.vline(self.y+2,x,curses.ACS_VLINE,self.h-2)
                 win.addch(self.y+self.h,x,curses.ACS_BTEE)
         for line in self.lines:
             tb=self.table
@@ -1298,7 +1299,7 @@ class Separator(Widget):
         if self.string:
             s+=self.string[:self.w-1]
         s+="_"*(self.w-len(s))
-        win.addstr(self.y,self.x,s)
+        win.addstr(self.y,self.x,s,get_col_attr("separator_color"))
 
 class Button(Widget):
     def on_keypress(self,k,source):
@@ -2229,7 +2230,7 @@ class TreeMode(HorizontalPanel):
             x=self.x+self.w-len(s)-3
             win.addch(self.y,x,curses.ACS_RTEE)
             x+=1
-            win.addstr(self.y,x,s)
+            win.addstr(self.y,x,s,get_col_attr("command_color"))
             x+=len(s)
             win.addch(self.y,x,curses.ACS_LTEE)
 
@@ -2521,7 +2522,7 @@ class FormMode(ScrollPanel):
             x=self.x+self.w-len(s)-3
             win.addch(self.y,x,curses.ACS_RTEE)
             x+=1
-            win.addstr(self.y,x,s)
+            win.addstr(self.y,x,s,get_col_attr("command_color"))
             x+=len(s)
             win.addch(self.y,x,curses.ACS_LTEE)
 
