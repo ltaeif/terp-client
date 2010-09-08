@@ -2850,6 +2850,12 @@ class SelectBox(ListView):
         root_panel.add(self)
 
 class SearchPopup(Table):
+    def on_close(self,ids):
+        root_panel.close_popup(self)
+
+    def on_cancel(self,arg,source):
+        self.on_close(None)
+
     def __init__(self):
         super(SearchPopup,self).__init__()
         self.col=1
@@ -2868,6 +2874,7 @@ class SearchPopup(Table):
         #buttons.add(btn_find)
         btn_cancel=Button()
         btn_cancel.string="Cancel"
+        btn_cancel.add_event_listener("push",self.on_cancel)
         buttons.add(btn_cancel)
         btn_ok=Button()
         btn_ok.string="OK"
@@ -2877,9 +2884,6 @@ class SearchPopup(Table):
         self.string=""
         self.query=""
         self.context={}
-
-    def on_close(self,ids):
-        root_panel.close_popup(self)
 
     def show(self):
         self.tree_mode.load_view()
