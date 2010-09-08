@@ -628,6 +628,8 @@ class Notebook(DeckPanel):
         self.can_focus=True
         self.tab_x=[]
         self.borders=[1,1,1,1]
+        self.maxw=-1
+        self.update_maxw=False
 
     def compute_tabs(self):
         x=self.x+3
@@ -2698,7 +2700,7 @@ class InputM2M(ObjBrowser,Input):
     def __init__(self,model,modes=None,views=None):
         super(InputM2M,self).__init__(model,modes=modes,views=views,add=True)
         self.maxh=9
-        self.update_max_h=False
+        self.update_maxh=False
         self.maxw=-1
         self.update_maxw=False
 
@@ -2937,7 +2939,6 @@ class RootPanel(DeckPanel):
             ind=self.get_tabindex()
             i=ind.index(source)
             i=(i+1)%len(ind)
-            #log("move down",source,getattr(source,"name",""),"->",ind[i],getattr(ind[i],"name",""))
             self.clear_focus()
             ind[i].set_focus()
             self.set_cursor()
@@ -2945,6 +2946,20 @@ class RootPanel(DeckPanel):
             ind=self.get_tabindex()
             i=ind.index(source)
             i=(i-1)%len(ind)
+            self.clear_focus()
+            ind[i].set_focus()
+            self.set_cursor()
+        elif k==338:
+            ind=self.get_tabindex()
+            i=ind.index(source)
+            i=(i+5)%len(ind)
+            self.clear_focus()
+            ind[i].set_focus()
+            self.set_cursor()
+        elif k==339:
+            ind=self.get_tabindex()
+            i=ind.index(source)
+            i=(i-5)%len(ind)
             self.clear_focus()
             ind[i].set_focus()
             self.set_cursor()
@@ -3088,8 +3103,8 @@ def start(stdscr):
     action(act_id)
     while 1:
         k=screen.getch()
-        #if dbg_mode:
-        #    set_trace()
+        if dbg_mode:
+            set_trace()
         if k==ord('D'):
             #set_trace()
             dbg_mode=1
