@@ -2124,12 +2124,13 @@ class TreeMode(HorizontalPanel):
                         link=LinkPopup()
                         link.model=self.parent.model
                         link.record=self.parent.record
+                        link.context=self.parent.context
                         link.view_wg=self.parent.view_wg
                         link.string=self.parent.field["string"]
                         link.form_mode.view=self.parent.field["views"].get("form")
                         link.form_mode.record=ObjRecord(self.parent.model)
                         link.form_mode.load_view()
-                        link.form_mode.record.read(link.form_mode.view["fields"])
+                        link.form_mode.read()
                         def on_close(save=False):
                             if save:
                                 rec=link.form_mode.record.copy()
