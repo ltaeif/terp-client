@@ -29,6 +29,8 @@ import xml.etree.ElementTree
 import pdb
 import traceback
 import re
+import ConfigParser
+import os
 
 parser=OptionParser()
 parser.add_option("-H","--host",dest="host",help="host name",metavar="HOST",default="127.0.0.1")
@@ -58,6 +60,8 @@ screen=None
 root_panel=None
 log_file=file("/tmp/terp.log","a")
 dbg_mode=0
+
+colors={}
 
 def log(*args):
     if not log_file:
@@ -417,6 +421,7 @@ class ScrollPanel(Panel):
         else:
             wg.h=wg.maxh
         wg.window=curses.newpad(wg.h+1,wg.w) # XXX: python-curses bug? should not need h+1 (can't write in bottom-right corner of window)
+        wg.window.bkgdset(colors['base_color'])
         wg.win_y=self.win_y+self.y+self.borders[0]-self.y0
         wg.win_x=self.win_x+self.x+self.borders[3]
         wg._compute_pass2()
@@ -611,7 +616,7 @@ class TabPanel(DeckPanel):
             if wg==self.cur_wg:
                 win.addstr(self.y,x,s,curses.A_REVERSE)
             else:
-                win.addstr(self.y,x,s)
+                win.addstr(self.y,x,s,)
             i+=1
         super(TabPanel,self).draw()
 
@@ -3089,10 +3094,35 @@ def action(act_id,_act=None):
     else:
         raise Exception("Unsupported action type: %s"%act["type"])
 
+def read_config():
+    global colors
+    conf=ConfigParser.ConfigParser()
+    conf.read(['.terprc',os.path.expanduser('~/.terprc')])
+    colors={
+        "black": curses.COLOR_BLACK,
+        "blue": curses.COLOR_BLUE,
+        "cyan": curses.COLOR_CYAN,
+        "green": curses.COLOR_GREEN,
+        "magenta": curses.COLOR_MAGENTA,
+        "red": curses.COLOR_RED,
+        "white": curses.COLOR_WHITE,
+        "yellow": curses.COLOR_YELLOW,
+    }
+    if conf.has_option("Colors","base_color"):
+        pair=conf.get("Colors","base_color")
+    else:
+        pair="white,black"
+    fcol,bcol=pair.split(",")
+    curses.init_pair(1,colors[fcol],colors[bcol])
+    colors["base_color"]=curses.color_pair(1)
+
 def start(stdscr):
     global screen,root_panel,dbg_mode
     screen=stdscr
     screen.keypad(1)
+    curses.start_color()
+    read_config()
+    screen.bkgdset(0,colors['base_color'])
     root_panel=RootPanel()
     user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
     root_panel.status.set_user(user["name"])
@@ -3112,4 +3142,5 @@ def start(stdscr):
         if not source:
             raise Exception("could not find key press source widget")
         source.process_event("keypress",k,source)
+
 curses.wrapper(start)
