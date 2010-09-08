@@ -18,6 +18,7 @@
 - tryton backend support
 - color!
 - web demo using shellinabox
+- speedup
 - cleanup
 - documentation
 - python packaging

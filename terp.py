@@ -61,7 +61,12 @@ root_panel=None
 log_file=file("/tmp/terp.log","a")
 dbg_mode=0
 
-colors={}
+color_pairs={
+    "base_color": [1,"white,black"],
+    "selection_color": [2,"black,white"],
+    "tabpanel_color": [3,"white,black"],
+    "statuspanel_color": [4,"white,black"],
+}
 
 def log(*args):
     if not log_file:
@@ -421,7 +426,7 @@ class ScrollPanel(Panel):
         else:
             wg.h=wg.maxh
         wg.window=curses.newpad(wg.h+1,wg.w) # XXX: python-curses bug? should not need h+1 (can't write in bottom-right corner of window)
-        wg.window.bkgdset(colors['base_color'])
+        wg.window.bkgd(get_col_attr('base_color'))
         wg.win_y=self.win_y+self.y+self.borders[0]-self.y0
         wg.win_x=self.win_x+self.x+self.borders[3]
         wg._compute_pass2()
@@ -610,13 +615,15 @@ class TabPanel(DeckPanel):
     def draw(self):
         win=self.window
         i=0
+        col=get_col_attr("tabpanel_color")
+        win.addstr(self.y,self.x," "*self.w,col) # XXX: use window for this
         for wg in self._childs:
             x=self.tab_x[i]
-            s="%d %s "%(i+1,wg.name)
-            if wg==self.cur_wg:
-                win.addstr(self.y,x,s,curses.A_REVERSE)
-            else:
-                win.addstr(self.y,x,s,)
+            s="%d "%(i+1)
+            win.addstr(self.y,x,s,(wg==self.cur_wg and get_col_attr("selection_color") or col|curses.A_BOLD))
+            x+=2
+            s="%s "%wg.name
+            win.addstr(self.y,x,s,wg==self.cur_wg and get_col_attr("selection_color") or col)
             i+=1
         super(TabPanel,self).draw()
 
@@ -2884,6 +2891,8 @@ class StatusPanel(Table):
         self.label=Label()
         self.col=1
         self.add(self.label)
+        self.maxw=-1
+        self.update_maxw=False
 
     def set_user(self,user):
         self.user=user
@@ -2891,6 +2900,23 @@ class StatusPanel(Table):
 
     def update(self):
         self.label.string="%s:%d [%s] %s"%(opts.host,opts.port,dbname,self.user)
+
+    def _compute_pass2(self):
+        self.window=curses.newpad(self.h+1,self.w) # XXX
+        self.window.bkgd(get_col_attr('statuspanel_color'))
+        self.win_y=self.win_y+self.y
+        self.win_x=self.win_x+self.x
+        self.y=0
+        self.x=0
+        super(StatusPanel,self)._compute_pass2()
+
+    def refresh(self):
+        y0=self.win_y
+        x0=self.win_x
+        y1=y0+self.h-1
+        x1=x0+self.w-1
+        self.window.refresh(0,0,y0,x0,y1,x1)
+        super(StatusPanel,self).refresh()
 
 class MessageBox(Table):
     def on_close(self,val):
@@ -3095,10 +3121,10 @@ def action(act_id,_act=None):
         raise Exception("Unsupported action type: %s"%act["type"])
 
 def read_config():
-    global colors
+    global color_pairs
     conf=ConfigParser.ConfigParser()
     conf.read(['.terprc',os.path.expanduser('~/.terprc')])
-    colors={
+    col_names={
         "black": curses.COLOR_BLACK,
         "blue": curses.COLOR_BLUE,
         "cyan": curses.COLOR_CYAN,
@@ -3108,13 +3134,16 @@ def read_config():
         "white": curses.COLOR_WHITE,
         "yellow": curses.COLOR_YELLOW,
     }
-    if conf.has_option("Colors","base_color"):
-        pair=conf.get("Colors","base_color")
-    else:
-        pair="white,black"
-    fcol,bcol=pair.split(",")
-    curses.init_pair(1,colors[fcol],colors[bcol])
-    colors["base_color"]=curses.color_pair(1)
+    for col,(i,val) in color_pairs.items():
+        if conf.has_option("Colors",col):
+            val=conf.get("Colors",col)
+            color_pairs[col][1]=val
+        fcol,bcol=val.split(",")
+        curses.init_pair(i,col_names[fcol],col_names[bcol])
+
+def get_col_attr(name):
+    i=color_pairs[name][0]
+    return curses.color_pair(i)
 
 def start(stdscr):
     global screen,root_panel,dbg_mode
@@ -3122,7 +3151,7 @@ def start(stdscr):
     screen.keypad(1)
     curses.start_color()
     read_config()
-    screen.bkgdset(0,colors['base_color'])
+    screen.bkgd(0,get_col_attr('base_color'))
     root_panel=RootPanel()
     user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
     root_panel.status.set_user(user["name"])
