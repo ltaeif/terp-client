@@ -69,6 +69,10 @@ color_pairs={
     "command_color": [5,"yellow,blue"],
     "separator_color": [6,"cyan,blue"],
     "button_color": [7,"green,blue"],
+    "scrollbar_color": [8,"white,blue"],
+    "notebook_color": [9,"white,blue"],
+    "fieldlabel_color": [10,"white,blue"],
+    "header_color": [11,"white,blue"],
 }
 
 def log(*args):
@@ -149,6 +153,7 @@ class Widget(object):
         self.has_focus=False
         self.update_can_focus=False
         self.view_wg=None
+        self.color=0
 
     def to_s(self,d=0):
         s="  "*d
@@ -449,8 +454,10 @@ class ScrollPanel(Panel):
             h0=0
             h1=h_total
         if not (h0==0 and h1==h_total):
+            win.attron(get_col_attr("scrollbar_color"))
             win.vline(self.y+self.borders[0],self.x+self.w-1-self.borders[1],curses.ACS_VLINE,h_total)
             win.vline(self.y+self.borders[0]+h0,self.x+self.w-1-self.borders[1],curses.ACS_CKBOARD,h1-h0)
+            win.attroff(get_col_attr("scrollbar_color"))
 
     def refresh(self):
         wg=self._childs[0]
@@ -677,7 +684,7 @@ class Notebook(DeckPanel):
             if self.cur_wg==wg:
                 win.addstr(self.y,x-1,s,curses.A_BOLD)
             else:
-                win.addstr(self.y,x-1,s)
+                win.addstr(self.y,x-1,s,get_col_attr("notebook_color"))
             if i==len(self._childs)-1:
                 win.addch(self.y,x+len(wg.string)+1,curses.ACS_LTEE)
             i+=1
@@ -1107,6 +1114,7 @@ class ListView(VerticalPanel):
         for header in headers:
             wg=Label()
             wg.string=header
+            wg.color=get_col_attr("header_color")
             self.headers.add(wg)
 
     def make_line_widgets(self,line):
@@ -1286,7 +1294,7 @@ class Label(Widget):
     def draw(self):
         win=self.window
         s=self.string[:self.w]
-        win.addstr(self.y,self.x,s)
+        win.addstr(self.y,self.x,s,self.color)
 
 class Separator(Widget):
     def __init__(self):
@@ -1324,12 +1332,16 @@ class Button(Widget):
     def draw(self):
         win=self.window
         s="["+self.string[:self.w-2]+"]"
-        win.addstr(self.y,self.x,s,get_col_attr("button_color"))
+        win.addstr(self.y,self.x,s,self.color)
 
     def set_cursor(self):
         self.move_cursor(self.y,self.x+1)
 
 class FormButton(Button):
+    def __init__(self):
+        super(FormButton,self).__init__()
+        self.color=get_col_attr("button_color")
+
     def on_push(self,arg,source):
         type=getattr(self,"type","wizard")
         if type=="wizard":
@@ -1354,7 +1366,7 @@ class FieldLabel(Widget):
         win=self.window
         s=self.string[:self.w-1]
         s+=":"
-        win.addstr(self.y,self.x,s)
+        win.addstr(self.y,self.x,s,get_col_attr("fieldlabel_color"))
 
 class Input(Widget):
     def __init__(self):
