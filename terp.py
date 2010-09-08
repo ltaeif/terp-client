@@ -1346,7 +1346,11 @@ class FormButton(Button):
         type=self.view_attrs.get("type","wizard")
         if type=="wizard":
             rpc_exec_wkf(self.record.model,self.view_attrs['name'],self.record.id)
-            #self.view_wg.read()
+            self.record.clear()
+            self.view_wg.read()
+            root_panel.compute()
+            root_panel.draw()
+            root_panel.refresh()
             root_panel.clear_focus()
             root_panel.set_focus()
             root_panel.set_cursor()
@@ -1360,8 +1364,8 @@ class FormButton(Button):
                 root_panel.draw()
                 root_panel.refresh()
                 root_panel.clear_focus()
-                self.set_focus()
-                self.set_cursor()
+                root_panel.set_focus()
+                root_panel.set_cursor()
         else:
             raise Exception("invalid button type: %s"%type)
 
