@@ -267,12 +267,14 @@ class Widget(object):
                         val=self.record.get_val(name)
                         if op=="=":
                             res=val==param
-                        elif op=="!=":
+                        elif op in ("!=","<>"):
                             res=val!=param
                         elif op=="in":
                             res=val in param
                         elif op=="not in":
                             res=not val in param
+                        else:
+                            raise Exception('invalid operation in domain: %s'%op)
                         if not res:
                             eval_dom=False
                             break
@@ -1617,7 +1619,7 @@ class InputSelect(StringInput):
                 self.set_focus()
                 self.set_cursor()
             wg.on_close=on_close
-            wg.show(self.win_y+self.y,self.win_x+self.x,self.str_val)
+            wg.show(self.win_y+self.y,self.win_x+self.x)
 
     def __init__(self):
         super(InputSelect,self).__init__()
@@ -2828,8 +2830,9 @@ class SelectBox(ListView):
         return True
 
     def __init__(self):
-        super(SelectBox,self).__init__()
+        super(SelectBox,self).__init__(header=False)
         self.col=1
+        self.table.col=1
         self.selection={}
 
     def show(self,y,x):
@@ -2850,7 +2853,7 @@ class SelectBox(ListView):
         self.x=x
         self._compute_pass2()
         self.draw()
-        screen.refresh()
+        self.refresh()
         root_panel.clear_focus()
         self.set_focus()
         self.set_cursor()
