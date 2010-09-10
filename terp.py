@@ -1687,6 +1687,8 @@ class InputM2O(StringInput):
     def on_keypress(self,k,source):
         super(InputM2O,self).on_keypress(k,source)
         if k==ord("\n"):
+            if getattr(self.view_wg,'tree',None) and not self.view_wg.tree.view_attrs.get('editable'):
+                return False
             val=self.get_val()
             if val:
                 link=LinkPopup()
