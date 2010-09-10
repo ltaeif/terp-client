@@ -2130,41 +2130,55 @@ class TreeMode(HorizontalPanel):
         elif k==ord('\n'):
             if source==self:
                 if self.cur_cmd=="N":
-                    if self.parent.view_wg:
-                        link=LinkPopup()
-                        link.model=self.parent.model
-                        link.record=self.parent.record
-                        link.context=self.parent.context
-                        link.view_wg=self.parent.view_wg
-                        link.string=self.parent.field["string"]
-                        link.form_mode.view=self.parent.field["views"].get("form")
-                        link.form_mode.record=ObjRecord(self.parent.model)
-                        link.form_mode.load_view()
-                        link.form_mode.read()
-                        def on_close(save=False):
-                            if save:
-                                rec=link.form_mode.record.copy()
-                                self.parent.record.set_val(self.parent.name,self.parent.records+[rec])
-                                self.read()
-                            root_panel.close_popup(link)
-                            root_panel.clear_focus()
-                            self.set_focus()
-                            self.set_cursor()
-                        link.on_close=on_close
-                        link.show()
-                    else:
+                    editable=self.tree.view_attrs.get('editable')
+                    if editable:
                         rec=ObjRecord(self.parent.model)
-                        self.parent.cur_mode="form"
-                        self.parent.mode_wg['form'].record=rec
-                        self.parent.load_view()
-                        self.parent.read()
-                        self.parent.cur_wg=self.parent.mode_wg["form"]
+                        rec.read(self.view["fields"],self.parent.context)
+                        self.tree.add_records([rec])
+                        self.parent.set_val(self.parent.records+[rec])
                         root_panel.compute()
                         root_panel.draw()
                         root_panel.refresh()
                         root_panel.clear_focus()
-                        root_panel.set_focus()
-                        root_panel.set_cursor()
+                        wg=self.tree.lines[-1].widgets[0]
+                        wg.set_focus()
+                        wg.set_cursor()
+                    else:
+                        if self.parent.view_wg:
+                            link=LinkPopup()
+                            link.model=self.parent.model
+                            link.record=self.parent.record
+                            link.context=self.parent.context
+                            link.view_wg=self.parent.view_wg
+                            link.string=self.parent.field["string"]
+                            link.form_mode.view=self.parent.field["views"].get("form")
+                            link.form_mode.record=ObjRecord(self.parent.model)
+                            link.form_mode.load_view()
+                            link.form_mode.read()
+                            def on_close(save=False):
+                                if save:
+                                    rec=link.form_mode.record.copy()
+                                    self.parent.record.set_val(self.parent.name,self.parent.records+[rec])
+                                    self.read()
+                                root_panel.close_popup(link)
+                                root_panel.clear_focus()
+                                self.set_focus()
+                                self.set_cursor()
+                            link.on_close=on_close
+                            link.show()
+                        else:
+                            rec=ObjRecord(self.parent.model)
+                            self.parent.cur_mode="form"
+                            self.parent.mode_wg['form'].record=rec
+                            self.parent.load_view()
+                            self.parent.read()
+                            self.parent.cur_wg=self.parent.mode_wg["form"]
+                            root_panel.compute()
+                            root_panel.draw()
+                            root_panel.refresh()
+                            root_panel.clear_focus()
+                            root_panel.set_focus()
+                            root_panel.set_cursor()
                 elif self.cur_cmd=="+":
                     wg=SearchPopup()
                     wg.string=self.parent.field["string"]
@@ -2355,8 +2369,9 @@ class TreeMode(HorizontalPanel):
                             wg=InputM2M_list()
                         else:
                             raise Exception("invalid field type: %s"%field["type"])
-                        wg.readonly=True
-                        wg.update_readonly=False
+                        if not self.tree.view_attrs.get('editable'):
+                            wg.readonly=True
+                            wg.update_readonly=False
                         wg.name=name
                         wg.field=field
                         wg.view_attrs=child.attrib
@@ -2364,8 +2379,9 @@ class TreeMode(HorizontalPanel):
                     elif child.tag=="button":
                         wg=Button()
                     wg.view_wg=self
-                    wg.can_focus=i==0
-                    wg.update_can_focus=False
+                    if not self.tree.view_attrs.get('editable'):
+                        wg.can_focus=i==0
+                        wg.update_can_focus=False
                     wg.set_record(record)
                     widgets.append(wg)
                     i+=1
