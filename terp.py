@@ -2138,7 +2138,8 @@ class TreeMode(HorizontalPanel):
                         rec=ObjRecord(self.parent.model)
                         rec.read(self.view["fields"],self.parent.context)
                         self.tree.add_records([rec])
-                        self.parent.set_val(self.parent.records+[rec])
+                        if self.parent.view_wg:
+                            self.parent.set_val(self.parent.records+[rec])
                         root_panel.compute()
                         root_panel.draw()
                         root_panel.refresh()
