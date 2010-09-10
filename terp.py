@@ -2349,6 +2349,8 @@ class TreeMode(HorizontalPanel):
                             wg=InputSelect()
                         elif field["type"]=="many2one":
                             wg=InputM2O()
+                        elif field["type"]=="one2many":
+                            wg=InputO2M_list()
                         elif field["type"]=="many2many":
                             wg=InputM2M_list()
                         else:
@@ -2781,6 +2783,26 @@ class InputM2M(ObjBrowser,Input):
         val=self.get_val()
         self.records=val
         self.read()
+
+class InputO2M_list(StringInput):
+    def on_keypress(self,k,source):
+        super(InputO2M_list,self).on_keypress(k,source)
+        if k==ord("\n"):
+            wg=SearchPopup()
+            wg.model=self.field["relation"]
+            wg.target_wg=self
+            wg.show(self.str_val)
+
+    def val_to_str(self,val):
+        if val is False:
+            return ""
+        return "(%d)"%len(val)
+
+    def _compute_pass1(self):
+        if self.readonly:
+            self.maxw=len(self.str_val)
+        else:
+            self.maxw=-1
 
 class InputM2M_list(StringInput):
     def on_keypress(self,k,source):
