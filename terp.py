@@ -1722,6 +1722,7 @@ class InputM2O(StringInput):
                     self.set_cursor()
                 wg.on_close=on_close
                 wg.show()
+            return True
 
     def __init__(self):
         super(InputM2O,self).__init__()

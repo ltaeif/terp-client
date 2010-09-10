@@ -1,3 +1,5 @@
+- mark required fields
+- detect changed per field not record
 - simplify event handler declaration (avoid sub funcs)
 - right-align floats
 - center view when scroll
