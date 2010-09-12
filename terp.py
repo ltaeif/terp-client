@@ -48,7 +48,8 @@ if opts.debug:
         pdb.pm()
     sys.excepthook=ex_info
 
-rpc=xmlrpclib.ServerProxy("http://%s:%d/xmlrpc/object"%(opts.host,opts.port))
+rpc_obj=xmlrpclib.ServerProxy("http://%s:%d/xmlrpc/object"%(opts.host,opts.port))
+rpc_wiz=xmlrpclib.ServerProxy("http://%s:%d/xmlrpc/wizard"%(opts.host,opts.port))
 
 dbname=opts.dbname
 if not dbname:
@@ -83,17 +84,17 @@ def log(*args):
     log_file.write(msg+"\n")
     log_file.flush()
 
-def rpc_exec(*args):
+def rpc_obj_exec(*args):
     try:
-        return rpc.execute(dbname,uid,passwd,*args)
+        return rpc_obj.execute(dbname,uid,passwd,*args)
     except Exception,e:
-        raise Exception("rpc_exec failed: %s %s %s %s\n%s"%(dbname,uid,passwd,str(args),str(e)))
+        raise Exception("rpc_obj_exec failed: %s %s %s %s\n%s"%(dbname,uid,passwd,str(args),str(e)))
 
-def rpc_exec_wkf(*args):
+def rpc_obj_exec_wkf(*args):
     try:
-        return rpc.exec_workflow(dbname,uid,passwd,*args)
+        return rpc_obj.exec_workflow(dbname,uid,passwd,*args)
     except Exception,e:
-        raise Exception("rpc_exec_wkf failed: %s %s %s %s\n%s"%(dbname,uid,passwd,str(args),str(e)))
+        raise Exception("rpc_obj_exec_wkf failed: %s %s %s %s\n%s"%(dbname,uid,passwd,str(args),str(e)))
 
 def set_trace():
     curses.nocbreak()
@@ -1355,7 +1356,7 @@ class FormButton(Button):
     def on_push(self,arg,source):
         type=self.view_attrs.get("type","wizard")
         if type=="wizard":
-            rpc_exec_wkf(self.record.model,self.view_attrs['name'],self.record.id)
+            rpc_obj_exec_wkf(self.record.model,self.view_attrs['name'],self.record.id)
             self.record.clear()
             self.view_wg.read()
             root_panel.compute()
@@ -1366,7 +1367,7 @@ class FormButton(Button):
             root_panel.set_cursor()
         elif type=="object":
             ObjRecord.save([self.record]) # XXX
-            res=rpc_exec(self.record.model,self.view_attrs['name'],[self.record.id])
+            res=rpc_obj_exec(self.record.model,self.view_attrs['name'],[self.record.id])
             if res:
                 self.record.clear()
                 self.view_wg.read()
@@ -1428,7 +1429,7 @@ class Input(Widget):
             args=(args,)
         ids=[self.record.id or False]
         log('  ',func,args)
-        res=rpc_exec(self.record.model,func,ids,*args)
+        res=rpc_obj_exec(self.record.model,func,ids,*args)
         if res and "value" in res:
             vals=res["value"]
             log('vals',vals)
@@ -1939,7 +1940,7 @@ class ObjRecord(object):
             listener()
         return True
 
-    def get_val(self,name,default=None):
+    def get_val(self,name,default=False):
         return self.vals.get(name,default)
 
     def set_val(self,name,val):
@@ -1963,7 +1964,7 @@ class ObjRecord(object):
     @staticmethod
     def convert_m2o(val,model):
         if type(val)==type(1):
-            name=rpc_exec(model,'name_get',[val])[0][1]
+            name=rpc_obj_exec(model,'name_get',[val])[0][1]
             val=(val,name)
         return val
 
@@ -1972,9 +1973,9 @@ class ObjRecord(object):
         if not names:
             return
         if self.id:
-            res=rpc_exec(self.model,"read",[self.id],names,context or {})[0]
+            res=rpc_obj_exec(self.model,"read",[self.id],names,context or {})[0]
         else:
-            res=rpc_exec(self.model,"default_get",names,context or {})
+            res=rpc_obj_exec(self.model,"default_get",names,context or {})
         for name in names:
             field=fields[name]
             self.fields[name]=field
@@ -1993,7 +1994,7 @@ class ObjRecord(object):
         for rec in recs:
             if rec.id:
                 ids[rec.id]=rec
-        res=rpc_exec(model,"read",ids.keys(),fields,context or {})
+        res=rpc_obj_exec(model,"read",ids.keys(),fields,context or {})
         for r in res:
             rec=ids[r["id"]]
             for name,val in r.items():
@@ -2051,11 +2052,11 @@ class ObjRecord(object):
             if not op:
                 continue
             if op[0]==0:
-                rec.id=rpc_exec(rec.model,"create",op[2])
+                rec.id=rpc_obj_exec(rec.model,"create",op[2])
             elif op[0]==1:
-                rpc_exec(rec.model,"write",[op[1]],op[2])
+                rpc_obj_exec(rec.model,"write",[op[1]],op[2])
             elif op[0]==2:
-                rpc_exec(rec.model,"unlink",[op[1]])
+                rpc_obj_exec(rec.model,"unlink",[op[1]])
         ObjRecord.after_save(recs)
 
     @staticmethod
@@ -2398,7 +2399,7 @@ class TreeMode(HorizontalPanel):
 
     def load_view(self):
         if not self.view:
-            self.view=rpc_exec(self.parent.model,"fields_view_get",self.view_id or False,"tree",self.parent.context)
+            self.view=rpc_obj_exec(self.parent.model,"fields_view_get",self.view_id or False,"tree",self.parent.context)
         arch=xml.etree.ElementTree.fromstring(self.view["arch"])
         if self.tree:
             self.pop()
@@ -2450,10 +2451,12 @@ class TreeMode(HorizontalPanel):
                     root_panel.set_cursor()
             elif self.parent.type=="tree":
                 line=self.tree.lines[line_no]
-                res=rpc_exec("ir.values","get","action","tree_but_open",[(self.parent.model,line.record.id)])
+                rec=line.record
+                datas={'id':rec.id}
+                res=rpc_obj_exec("ir.values","get","action","tree_but_open",[(self.parent.model,line.record.id)])
                 if res:
                     act=res[0][2]
-                    action(act["id"],_act=act)
+                    action(act["id"],_act=act,datas=datas)
         self.tree.add_event_listener("open",on_open)
         def on_expand(line_no,source):
             parent_line=self.tree.lines[line_no]
@@ -2738,7 +2741,7 @@ class FormMode(ScrollPanel):
 
     def load_view(self):
         if not self.view:
-            self.view=rpc_exec(self.parent.model,"fields_view_get",self.view_id or False,"form",self.parent.context)
+            self.view=rpc_obj_exec(self.parent.model,"fields_view_get",self.view_id or False,"form",self.parent.context)
         arch=xml.etree.ElementTree.fromstring(self.view["arch"])
         self.fields=self.view["fields"]
         if self.form:
@@ -2947,7 +2950,7 @@ class SearchPopup(Table):
             self.on_close(ids)
         self.tree_mode.tree.add_event_listener("open",on_open)
         self.title.string="Search: "+self.string
-        ids=rpc_exec(self.model,"search",self.domain)
+        ids=rpc_obj_exec(self.model,"search",self.domain or [])
         if len(ids)==1:
             self.on_close(ids)
         else:
@@ -3119,20 +3122,29 @@ class RootPanel(DeckPanel):
         self.win_y=0
         self.win_x=0
 
-    def new_window(self,act):
+    def new_window(self,act,datas=None):
+        if not datas:
+            datas={}
+        env={
+            'active_id': datas.get('id'),
+        }
         name=act.get("name")
         model=act["res_model"]
-        type=act.get("view_type")
+        view_type=act.get("view_type")
         modes=act.get("view_mode") and act["view_mode"].split(",") or None
-        domain=act.get("domain") and eval(act["domain"]) or []
-        context=act.get("context") and eval(act["context"]) or {}
+        domain=act.get("domain") and eval(act["domain"],env) or []
+        context_str=act.get('context')
+        if context_str and type(context_str)==type(''):
+            context=eval(context_str,env) or {}
+        else:
+            context=context_str or {}
         view_ids={}
         if act.get("views"):
             for (view_id,mode) in act.get("views"):
                 view_ids[mode]=view_id
         if act.get("view_id"):
             view_ids[modes[0]]=act["view_id"][0]
-        win=ObjBrowser(model,name=name,type=type,modes=modes,view_ids=view_ids,context=context,window=True)
+        win=ObjBrowser(model,name=name,type=view_type,modes=modes,view_ids=view_ids,context=context,window=True)
         new_rec=False
         if modes and modes[0]=="form":
             has_id=False
@@ -3148,7 +3160,7 @@ class RootPanel(DeckPanel):
                 rec.vals[cond[0]]=cond[2]
             recs=[rec]
         else:
-            ids=rpc_exec(model,"search",domain,0,80,False,context)
+            ids=rpc_obj_exec(model,"search",domain,0,80,False,context)
             recs=[ObjRecord(model,id) for id in ids]
         win.records=recs
         win.maxh=-1
@@ -3190,6 +3202,16 @@ class RootPanel(DeckPanel):
         self.set_focus()
         self.set_cursor()
 
+    def show_modal(self,wg):
+        self.show_popup(wg)
+        self._show_modal=True
+        while self._show_modal:
+            k=screen.getch()
+            source=root_panel.get_focus()
+            source.process_event("keypress",k,source)
+        self._childs.pop()
+        self.cur_wg=self._childs[-1]
+
     def compute(self):
         super(RootPanel,self).compute(24,80,0,0)
 
@@ -3210,20 +3232,107 @@ def view_to_s(el,d=0):
         s+="\n"+view_to_s(child,d+1)
     return s
 
-def act_window(act_id,_act=None):
+def act_window(act_id,_act=None,datas=None):
     if _act:
         act=_act
     else:
-        act=rpc_exec("ir.actions.act_window","read",[act_id],False)[0]
-    root_panel.new_window(act)
+        act=rpc_obj_exec("ir.actions.act_window","read",[act_id],False)[0]
+    root_panel.new_window(act,datas)
 
-def action(act_id,_act=None):
+class WizardForm(Table):
+    def __init__(self):
+        super(WizardForm,self).__init__()
+        self.col=1
+        self.title=Label()
+        self.add(self.title)
+        self.form_mode=FormMode()
+        self.add(self.form_mode)
+        self.buttons=Group()
+        self.add(self.buttons)
+        self.context={}
+        self.record=None
+        self.view_wg=None
+        self.view=None
+        self.action=None
+        self.datas=None
+        self.res=None
+
+    def on_push(self,arg,source):
+        self.res=source.name
+        root_panel._show_modal=False
+
+    def show(self):
+        self.title.string=self.action['name']
+        self.buttons.col=len(self.view['state'])
+        for btn in self.view['state']:
+            name=btn[0]
+            string=btn[1]
+            if len(btn)>2:
+                icon=btn[2]
+            wg=Button()
+            wg.string=string
+            wg.name=name
+            wg.add_event_listener("push",self.on_push)
+            self.buttons.add(wg)
+        rec=ObjRecord(self.action['wiz_name'])
+        self.form_mode.record=rec
+        self.form_mode.view=self.view
+        self.form_mode.load_view()
+        fields=self.view['fields']
+        rec.fields=fields
+        for f in fields:
+            if 'value' in fields[f]:
+                rec.set_val(f,fields[f]['value'])
+        rec.set_vals(self.datas['form'],self.view['fields'])
+        root_panel.show_modal(self)
+        return self.res
+
+def run_wizard(act,datas=None):
+    if not datas:
+        datas={}
+    datas['form']={}
+    state='init'
+    context={}
+    wiz_id=rpc_wiz.create(dbname,uid,passwd,act['wiz_name'])
+    while state!='end':
+        res=rpc_wiz.execute(dbname,uid,passwd,wiz_id,datas,state,context)
+        if not res:
+            break
+        if 'datas' in res:
+            datas['form'].update(res['datas'])
+        if res['type']=='form':
+            wg=WizardForm()
+            wg.action=act
+            wg.view=res
+            wg.datas=datas
+            state=wg.show()
+            for f,v in wg.form_mode.record.vals.items():
+                if wg.form_mode.record.fields[f]['type']=='many2one' and v and type(v)!=type(1):
+                    v=v[0]
+                datas['form'][f]=v
+        elif res['type']=='action':
+            action(None,res['action'],datas)
+            return
+        elif res['type']=='print':
+            raise Exception('action type not supported: %s'%res['type'])
+        elif res['type']=='state':
+            state=res['state']
+    root_panel.compute()
+    root_panel.draw()
+    root_panel.refresh()
+    root_panel.clear_focus()
+    root_panel.set_focus()
+    root_panel.set_cursor()
+
+def action(act_id,_act=None,datas=None):
     if _act:
         act=_act
     else:
-        act=rpc_exec("ir.actions.actions","read",act_id,["name","type"])
+        act=rpc_obj_exec("ir.actions.actions","read",act_id,["name","type"])
     if act["type"]=="ir.actions.act_window":
-        act_window(act_id,_act)
+        act_window(act_id,_act,datas)
+    elif act["type"]=="ir.actions.wizard":
+        run_wizard(act,datas)
     else:
         raise Exception("Unsupported action type: %s"%act["type"])
 
@@ -3260,10 +3369,10 @@ def start(stdscr):
     read_config()
     screen.bkgd(0,get_col_attr('base_color'))
     root_panel=RootPanel()
-    user=rpc_exec("res.users","read",uid,["name","action_id","menu_id"])
+    user=rpc_obj_exec("res.users","read",uid,["name","action_id","menu_id"])
     root_panel.status.set_user(user["name"])
     if opts.user_pref:
-        act_id=rpc_exec("res.users","action_get")
+        act_id=rpc_obj_exec("res.users","action_get")
     else:
         act_id=user["action_id"][0]
     action(act_id)
