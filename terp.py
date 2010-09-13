@@ -1783,6 +1783,15 @@ class InputReference(StringInput):
     def str_to_val(self,s):
         return False
 
+class InputBinary(StringInput):
+    def val_to_str(self,val):
+        if val is False:
+            return ""
+        return "{%s bytes}"%len(val)
+
+    def str_to_val(self,s):
+        return False
+
 class InputText(Input):
     def on_keypress(self,k,source):
         if self.readonly:
@@ -2763,6 +2772,8 @@ class FormMode(ScrollPanel):
                 wg=InputM2M(model,views=views)
             elif field["type"]=="reference":
                 wg=InputReference()
+            elif field["type"]=="binary":
+                wg=InputBinary()
             else:
                 raise Exception("unsupported field type: %s"%field["type"])
             wg.view_wg=self
