@@ -1,15 +1,17 @@
+- need to load all views in beginning to know which fields selectable
+- list filter
+- prev/next
 - mark required fields
+- title bg color+status bar in popups
 - detect changed per field not record
 - simplify event handler declaration (avoid sub funcs)
 - right-align floats
 - center view when scroll
 - fix selectbox cursor move
 - fix o2m in list?
-- list back/fwd, filter
 - fix: search btns
 - fix: record changed propag
 - fix: notebook height
-- form prev/next
 - tree editable
 - check required
 - resizable screen

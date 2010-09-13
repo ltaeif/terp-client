@@ -219,12 +219,24 @@ class Widget(object):
         if self.field:
             if "string" in self.field:
                 self.string=self.field["string"]
+            if "select" in self.field:
+                val=self.field['select']
+                if type(val)!=type(1):
+                    val=1
+                sel_fields=self.view_wg.parent.select_fields
+                sel_fields[self.name]=max(val,sel_fields.get(self.name,0))
         if "string" in self.view_attrs:
             self.string=self.view_attrs["string"]
         if "colspan" in self.view_attrs:
             self.colspan=int(self.view_attrs["colspan"])
         if "col" in self.view_attrs:
             self.col=int(self.view_attrs["col"])
+        if "select" in self.view_attrs:
+            val=eval(self.view_attrs['select'])
+            if type(val)!=type(1):
+                val=1
+            sel_fields=self.view_wg.parent.select_fields
+            sel_fields[self.name]=max(val,sel_fields.get(self.name,0))
 
     def update_attrs(self):
         new_attrs={}
@@ -1307,6 +1319,20 @@ class Label(Widget):
         s=self.string[:self.w]
         win.addstr(self.y,self.x,s,self.color)
 
+class Image(Widget):
+    def __init__(self):
+        super(Image,self).__init__()
+        self.maxh=1
+        self.string=""
+
+    def _compute_pass1(self):
+        self.maxw=len(self.string)+2
+
+    def draw(self):
+        win=self.window
+        s="{"+self.string[:self.w-2]+"}"
+        win.addstr(self.y,self.x,s,self.color)
+
 class Separator(Widget):
     def __init__(self):
         super(Separator,self).__init__()
@@ -2094,6 +2120,7 @@ class ObjBrowser(DeckPanel):
         self.cur_mode=self.modes[0]
         self.mode_wg={}
         self.records=[]
+        self.select_fields={}
         for mode in self.modes:
             if mode=="tree":
                 wg=TreeMode(type=self.type)
@@ -2117,7 +2144,7 @@ class ObjBrowser(DeckPanel):
     def read(self):
         self.mode_wg[self.cur_mode].read()
 
-class TreeMode(HorizontalPanel):
+class TreeMode(Table):
     def on_keypress(self,k,source):
         if k==curses.KEY_RIGHT:
             if source==self:
@@ -2258,7 +2285,10 @@ class TreeMode(HorizontalPanel):
         super(TreeMode,self).__init__()
         self.type=type
         self.borders=[1,1,1,1]
+        self.seps=[[(1,True)],[(1,True)]]
         self.add_event_listener("keypress",self.on_keypress)
+        self.search=None
+        self.root_list=None
         self.tree=None
         self.view=None
         self.view_id=None
@@ -2266,6 +2296,7 @@ class TreeMode(HorizontalPanel):
         self.can_focus=False
         self.rec_child_pool={}
         if type=="tree":
+            self.col=2
             self.root_list=ListView(header=False)
             self.root_list.set_col(1)
             self.root_list.scroll.maxh=-1
@@ -2290,7 +2321,7 @@ class TreeMode(HorizontalPanel):
                 root_panel.set_cursor()
             self.root_list.add_event_listener("open",on_open)
         elif type=="form":
-            pass
+            self.col=1
 
     def set_commands(self,type,modes,window=False,add=False):
         self.commands=[]
@@ -2387,6 +2418,7 @@ class TreeMode(HorizontalPanel):
                     if not self.tree.view_attrs.get('editable'):
                         wg.can_focus=i==0
                         wg.update_can_focus=False
+                    wg.init_attrs()
                     wg.set_record(record)
                     widgets.append(wg)
                     i+=1
@@ -2403,6 +2435,31 @@ class TreeMode(HorizontalPanel):
         arch=xml.etree.ElementTree.fromstring(self.view["arch"])
         if self.tree:
             self.pop()
+        if self.search:
+            self.pop()
+        if self.type=='form' and not self.parent.view_wg:
+            form_mode=self.parent.mode_wg.get('form')
+            if form_mode:
+                form_mode.load_view()
+            basic_select=[name for name,level in self.parent.select_fields.items() if name and level==1]
+            if basic_select:
+                self.search=FilterPanel()
+                self.search.view_wg=self
+                self.add(self.search)
+                self.search.record=ObjRecord(None)
+                for name in sorted(basic_select):
+                    if name in self.view['fields']:
+                        field=self.view['fields'][name]
+                    elif name in form_mode.view['fields']:
+                        field=form_mode.view['fields'][name]
+                    wgl=FieldLabel()
+                    wgl.string=field['string']
+                    self.search.add(wgl)
+                    wg=InputChar()
+                    wg.record=self.search.record
+                    wg.name=name
+                    self.search.record.fields[name]=field
+                    self.search.add(wg)
         self.tree=self.parse(arch,self.view["fields"])
         self.add(self.tree)
         self.tree.scroll.maxh=-1
@@ -2653,6 +2710,15 @@ class FormMode(ScrollPanel):
             wg.set_record(self.record)
             panel.add(wg)
             return wg
+        elif el.tag=="image":
+            wg=Image()
+            wg.view_wg=self
+            wg.view_attrs=el.attrib
+            wg.init_attrs()
+            wg.set_record(self.record)
+            wg.string=el.attrib.get('name','')
+            panel.add(wg)
+            return wg
         elif el.tag=="field":
             field=fields[el.attrib["name"]]
             if not el.attrib.get("nolabel"):
@@ -2688,12 +2754,10 @@ class FormMode(ScrollPanel):
                 modes=el.attrib.get("view_mode") and el.attrib["view_mode"].split(",") or None
                 views=field["views"]
                 wg=InputO2M(model,modes=modes,views=views)
-                wg.load_view()
             elif field["type"]=="many2many":
                 model=field["relation"]
                 views=field["views"]
                 wg=InputM2M(model,views=views)
-                wg.load_view()
             elif field["type"]=="reference":
                 wg=InputReference()
             else:
@@ -2708,6 +2772,8 @@ class FormMode(ScrollPanel):
                 wg.colspan-=1
             wg.set_record(self.record)
             panel.add(wg)
+            if field["type"] in ("one2many","many2many"):
+                wg.load_view()
             return wg
         elif el.tag=="group":
             wg=Group()
@@ -2918,6 +2984,8 @@ class SearchPopup(Table):
         self.add(self.title)
         self.tree_mode=TreeMode("form")
         self.add(self.tree_mode)
+        self.mode_wg={'tree':self.tree_mode}
+        self.select_fields={}
         buttons=Group()
         buttons.col=4
         self.add(buttons)
@@ -2958,6 +3026,32 @@ class SearchPopup(Table):
             self.tree_mode.read()
             root_panel.show_popup(self)
 
+class FilterPanel(Table):
+    def on_keypress(self,k,source):
+        if k==ord("\n"):
+            source.on_unfocus(None,source)
+            domain=self.view_wg.parent.domain
+            for name,val in self.record.vals.items():
+                if val:
+                    domain+=[('name','ilike',val)]
+            ids=rpc_obj_exec(self.view_wg.parent.model,"search",domain,0,80,False,self.view_wg.parent.context)
+            recs=[ObjRecord(self.view_wg.parent.model,id) for id in ids]
+            self.view_wg.parent.records=recs
+            self.view_wg.parent.read()
+            root_panel.compute()
+            root_panel.draw()
+            root_panel.refresh()
+            root_panel.clear_focus()
+            source.set_focus()
+            source.set_cursor()
+            return True
+
+    def __init__(self):
+        super(FilterPanel,self).__init__()
+        self.col=4
+        self.seps=[[(0,False)],[(1,False)]]
+        self.add_event_listener("keypress",self.on_keypress)
+
 class LinkPopup(Table):
     def on_close(self,save=False):
         root_panel.close_popup(self)
@@ -2970,6 +3064,7 @@ class LinkPopup(Table):
 
     def __init__(self):
         super(LinkPopup,self).__init__()
+        self.select_fields={}
         self.col=1
         self.title=Label()
         self.add(self.title)
@@ -3118,7 +3213,8 @@ class RootPanel(DeckPanel):
         self.status.update_maxh=False
         self.main.add(self.status)
         self.add_event_listener("keypress",self.on_keypress)
-        self.window=screen
+        self.window=curses.newpad(24,80)
+        self.window.bkgd(get_col_attr('base_color'))
         self.win_y=0
         self.win_x=0
 
@@ -3127,6 +3223,7 @@ class RootPanel(DeckPanel):
             datas={}
         env={
             'active_id': datas.get('id'),
+            'uid': uid,
         }
         name=act.get("name")
         model=act["res_model"]
@@ -3162,6 +3259,7 @@ class RootPanel(DeckPanel):
         else:
             ids=rpc_obj_exec(model,"search",domain,0,80,False,context)
             recs=[ObjRecord(model,id) for id in ids]
+        win.domain=domain
         win.records=recs
         win.maxh=-1
         win.update_maxh=False
@@ -3216,11 +3314,12 @@ class RootPanel(DeckPanel):
         super(RootPanel,self).compute(24,80,0,0)
 
     def draw(self):
-        screen.clear()
+        self.window.clear()
         super(RootPanel,self).draw()
 
     def refresh(self):
         screen.refresh()
+        self.window.refresh(0,0,0,0,23,79)
         super(RootPanel,self).refresh()
 
 def view_to_s(el,d=0):
