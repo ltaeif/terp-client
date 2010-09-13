@@ -31,6 +31,9 @@ import traceback
 import re
 import ConfigParser
 import os
+import locale
+
+locale.setlocale(locale.LC_ALL,"")
 
 parser=OptionParser()
 parser.add_option("-H","--host",dest="host",help="host name",metavar="HOST",default="127.0.0.1")
@@ -88,13 +91,13 @@ def rpc_obj_exec(*args):
     try:
         return rpc_obj.execute(dbname,uid,passwd,*args)
     except Exception,e:
-        raise Exception("rpc_obj_exec failed: %s %s %s %s\n%s"%(dbname,uid,passwd,str(args),str(e)))
+        raise Exception("rpc_obj_exec failed: %s %s %s %s\n%s"%(dbname,uid,passwd,unicode(args),unicode(e)))
 
 def rpc_obj_exec_wkf(*args):
     try:
         return rpc_obj.exec_workflow(dbname,uid,passwd,*args)
     except Exception,e:
-        raise Exception("rpc_obj_exec_wkf failed: %s %s %s %s\n%s"%(dbname,uid,passwd,str(args),str(e)))
+        raise Exception("rpc_obj_exec_wkf failed: %s %s %s %s\n%s"%(dbname,uid,passwd,unicode(args),unicode(e)))
 
 def set_trace():
     curses.nocbreak()
@@ -168,9 +171,9 @@ class Widget(object):
             val=getattr(self,name)
             if callable(val):
                 continue
-            s+=" %s=%s"%(name,str(val))
+            s+=" %s=%s"%(name,unicode(val))
         for name,val in self.view_attrs.items():
-            s+=" %s=%s"%(name,str(val))
+            s+=" %s=%s"%(name,unicode(val))
         return s
 
     def draw(self):
@@ -1544,7 +1547,7 @@ class StringInput(Input):
     def draw(self):
         win=self.window
         s=self.str_val[self.cur_origin:self.cur_origin+self.w]
-        s=s.encode('ascii','replace')
+        s=s.encode('utf-8')
         if not self.readonly:
             s+="_"*(self.w-len(s))
         if s:
@@ -1570,7 +1573,7 @@ class StringInput(Input):
 
 class InputChar(StringInput):
     def val_to_str(self,val):
-        return val and str(val) or ""
+        return val and unicode(val) or ""
 
     def str_to_val(self,s):
         if s=="":
@@ -1601,7 +1604,7 @@ class InputInteger(StringInput):
     def val_to_str(self,val):
         if val is False:
             return ""
-        return str(val)
+        return unicode(val)
 
     def is_valid(self,string):
         try:
@@ -1775,7 +1778,7 @@ class InputReference(StringInput):
     def val_to_str(self,val):
         if val is False:
             return ""
-        return str(val)
+        return unicode(val)
 
     def str_to_val(self,s):
         return False
